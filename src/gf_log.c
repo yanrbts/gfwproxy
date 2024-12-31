@@ -126,13 +126,14 @@ int log_loggable(int level) {
 void _log(const char *file, int line, int panic, const char *fmt, ...)
 {
     struct logger  *l = &logger;
-    int             len, size, errno_save;
+    int             len, size, errno_save, off, n;
     char            buf[LOG_MAX_LEN];
+    char            time_buf[64];
     va_list         args;
-    ssize_t         n;
     struct timeval  tv;
     time_t          now;
     struct tm       now_tm, *lt_ret;
+    const char      *c = ".-*#@!IDVWGP";    
 
     if (l->fd < 0)
         return;
@@ -147,9 +148,8 @@ void _log(const char *file, int line, int panic, const char *fmt, ...)
 	lt_ret = localtime_r(&now, &now_tm);
 	gettimeofday(&tv,NULL);
 
-    len += gf_scnprintf(buf+len, size-len, "[%d]", (int)getpid());
-    len += gf_strftime(buf+len, size-len, "%Y-%m-%d %H:%M:%S.", lt_ret);
-    len += gf_scnprintf(buf+len, size-len, "%03ld", tv.tv_usec/1000);
+    off = gf_strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S.", lt_ret);
+    gf_scnprintf(time_buf+off, sizeof(time_buf)-off, "%03ld", (int)tv.tv_usec/1000);
 #ifdef GF_DEBUG_LOG
     len += gf_scnprintf(buf+len, size-len, "%s:%d ", file, line);
 #endif
@@ -157,5 +157,126 @@ void _log(const char *file, int line, int panic, const char *fmt, ...)
     va_start(args, fmt);
     len += gf_vscnprintf(buf+len, size-len, fmt, args);
     va_end(args);
-    buf[len++] = '\n';
+    buf[len++] = '\0';
+
+    n = dprintf(l->fd, "\033[90m[%d]:%s %c \033[0m%s\n",
+            (int)getpid(), time_buf, c[l->level], buf);
+    if (n < 0) {
+        l->nerror++;
+    }
+
+    errno = errno_save;
+
+    if (panic) {
+        abort();
+    }
+}
+
+void _log_stderr(const char *fmt, ...)
+{
+    struct logger  *l = &logger;
+    int             len, size, errno_save, off, n;
+    char            buf[4*LOG_MAX_LEN];
+    char            time_buf[64];
+    va_list         args;
+    struct timeval  tv;
+    time_t          now;
+    struct tm       now_tm, *lt_ret;
+    const char      *c = ".-*#@!IDVWGP";
+
+    errno_save = errno;
+    len = 0;            /* length of output buffer */
+    size = LOG_MAX_LEN; /* size of output buffer */
+
+
+    /* get current time */
+	now = time(NULL);
+	lt_ret = localtime_r(&now, &now_tm);
+	gettimeofday(&tv,NULL);
+
+    off = gf_strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S.", lt_ret);
+    gf_scnprintf(time_buf+off, sizeof(time_buf)-off, "%03ld", (int)tv.tv_usec/1000);
+
+    va_start(args, fmt);
+    len += gf_vscnprintf(buf+len, size-len, fmt, args);
+    va_end(args);
+    buf[len++] = '\0';
+
+    n = dprintf(STDERR_FILENO, "\033[90m[%d]:%s %c \033[0m%s\n",
+            (int)getpid(), time_buf, c[l->level], buf);
+    if (n < 0) {
+        l->nerror++;
+    }
+
+    errno = errno_save;
+}
+
+/*
+ * Hexadecimal dump in the canonical hex + ascii display
+ * See -C option in man hexdump
+ */
+void _log_hexdump(const char *file, int line, const char *data, int datalen,
+             const char *fmt, ...)
+{
+    struct logger  *l = &logger;
+    char            buf[8*LOG_MAX_LEN];
+    int             i, off, len, size, errno_save;
+    ssize_t         n;
+
+    if (l->fd < 0)
+        return;
+    
+    errno_save = errno;
+    off = 0;                  /* data offset */
+    len = 0;                  /* length of output buffer */
+    size = 8*LOG_MAX_LEN;     /* size of output buffer */
+
+    while (datalen != 0 && (len < size-1)) {
+        const char *save, *str;
+        unsigned char c;
+        int savelen;
+
+        len += gf_scnprintf(buf+len, size-len, "%08x  ", off);
+
+        save = data;
+        savelen = datalen;
+
+        for (i = 0; datalen != 0 && i < 16; data++, datalen--, i++) {
+            c = (unsigned char)(*data);
+            str = (i == 7) ? "  " : " ";
+            len += gf_scnprintf(buf+len, size-len, "%02x%s", c, str);
+        }
+
+        for (; i < 16; i++) {
+            str = (i == 7) ? "  " : " ";
+            len += gf_scnprintf(buf+len, size-len, "  %s", str);
+        }
+
+        data = save;
+        datalen = savelen;
+
+        len += gf_scnprintf(buf + len, size - len, "  |");
+
+        for (i = 0; datalen != 0 && i < 16; data++, datalen--, i++) {
+            c = (unsigned char)(isprint(*data) ? *data : '.');
+            len += gf_scnprintf(buf + len, size - len, "%c", c);
+        }
+        len += gf_scnprintf(buf + len, size - len, "|\n");
+
+        off += 16;
+    }
+
+    n = gf_write(l->fd, buf, len);
+    if (n < 0) {
+        l->nerror++;
+    }
+
+    if (len >= size - 1) {
+        n = gf_write(l->fd, "\n", 1);
+        if (n < 0) {
+            l->nerror++;
+        }
+    }
+
+    errno = errno_save;
 }

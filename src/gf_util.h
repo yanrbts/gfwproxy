@@ -174,6 +174,35 @@ void *_gf_calloc(size_t nmemb, size_t size, const char *name, int line);
 void *_gf_realloc(void *ptr, size_t size, const char *name, int line);
 void _gf_free(void *ptr, const char *name, int line);
 
+/*
+ * Wrappers to send or receive n byte message on a blocking
+ * socket descriptor.
+ */
+#define gf_sendn(_s, _b, _n)    \
+    _gf_sendn(_s, _b, (size_t)(_n))
+
+#define gf_recvn(_s, _b, _n)    \
+    _gf_recvn(_s, _b, (size_t)(_n))
+
+/*
+ * Wrappers to read or write data to/from (multiple) buffers
+ * to a file or socket descriptor.
+ */
+#define gf_read(_d, _b, _n)     \
+    read(_d, _b, (size_t)(_n))
+
+#define gf_readv(_d, _b, _n)    \
+    readv(_d, _b, (int)(_n))
+
+#define gf_write(_d, _b, _n)    \
+    write(_d, _b, (size_t)(_n))
+
+#define gf_writev(_d, _b, _n)   \
+    writev(_d, _b, (int)(_n))
+
+ssize_t _gf_sendn(int sd, const void *vptr, size_t n);
+ssize_t _gf_recvn(int sd, void *vptr, size_t n);
+
 void gf_assert(const char *cond, const char *file, int line, int panic);
 void gf_stacktrace(int skip_count);
 void gf_stacktrace_fd(int fd);
