@@ -25,87 +25,59 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __GF_CORE_H__
-#define __GF_CORE_H__
+#ifndef __GF_ARRAY_H__
+#define __GF_ARRAY_H__
 
-#include <gf_auto_config.h>
+#include <gf_core.h>
 
-#ifdef HAVE_DEBUG_LOG
-# define GF_DEBUG_LOG 1
-#endif
+typedef int (*array_compare_t)(const void *, const void *);
+typedef rstatus_t (*array_each_t)(void *, void *);
 
-#ifdef HAVE_ASSERT_PANIC
-# define GF_ASSERT_PANIC 1
-#endif
+struct array {
+    uint32_t nelem;  /* # element */
+    void     *elem;  /* element */
+    size_t   size;   /* element size */
+    uint32_t nalloc; /* # allocated element */ 
+};
 
-#ifdef HAVE_ASSERT_LOG
-# define GF_ASSERT_LOG 1
-#endif
+#define null_array { 0, NULL, 0, 0 }
 
-#ifdef HAVE_STATS
-# define GF_STATS 1
-#else
-# define GF_STATS 0
-#endif
+static inline void
+array_null(struct array *a)
+{
+    a->nelem = 0;
+    a->elem = NULL;
+    a->size = 0;
+    a->nalloc = 0;
+}
 
-#ifdef HAVE_EPOLL
-# define GF_HAVE_EPOLL 1
-#elif HAVE_KQUEUE
-# define GF_HAVE_KQUEUE 1
-#elif HAVE_EVENT_PORTS
-# define GF_HAVE_EVENT_PORTS 1
-#else
-# error missing scalable I/O event notification mechanism
-#endif
+static inline void
+array_set(struct array *a, void *elem, size_t size, uint32_t nalloc)
+{
+    a->nelem = 0;
+    a->elem = elem;
+    a->size = size;
+    a->nalloc = nalloc;
+}
 
-#ifdef HAVE_LITTLE_ENDIAN
-# define GF_LITTLE_ENDIAN 1
-#endif
+static inline uint32_t
+array_n(const struct array *a)
+{
+    return a->nelem;
+}
 
-#ifdef HAVE_BACKTRACE
-# define GF_HAVE_BACKTRACE 1
-#endif
+struct array *array_create(uint32_t n, size_t size);
+void array_destroy(struct array *a);
+rstatus_t array_init(struct array *a, uint32_t n, size_t size);
+void array_deinit(struct array *a);
 
-#define GF_OK        0
-#define GF_ERROR    -1
-#define GF_EAGAIN   -2
-#define GF_ENOMEM   -3
-
-/* reserved fds for std streams, log, stats fd, epoll etc. */
-#define RESERVED_FDS 32
-
-typedef int rstatus_t; /* return type */
-typedef int err_t;     /* error type */
-
-struct array;
-struct mbuf;
-struct mhdr;
-
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <string.h>
-#include <stdio.h>
-#include <ctype.h>
-#include <errno.h>
-#include <limits.h>
-#include <time.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <stdlib.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <netinet/in.h>
-
-#include <gf_string.h>
-#include <gf_util.h>
-#include <gf_log.h>
-#include <gf_array.h>
-
+uint32_t array_idx(const struct array *a, const void *elem);
+void *array_push(struct array *a);
+void *array_pop(struct array *a);
+void *array_get(const struct array *a, uint32_t idx);
+void *array_top(const struct array *a);
+void array_swap(struct array *a, struct array *b);
+void array_sort(struct array *a, array_compare_t compare);
+rstatus_t array_each(const struct array *a, array_each_t func, void *data);
 
 #endif

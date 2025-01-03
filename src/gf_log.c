@@ -47,7 +47,7 @@ int log_init(int level, const char *filename) {
     } else {
         l->fd = open(filename, O_WRONLY | O_APPEND | O_CREAT, 0644);
         if (l->fd < 0) {
-            log_stderr("opening log file '%s' failed: %s", name,
+            log_stderr("opening log file '%s' failed: %s", filename,
                        strerror(errno));
             return -1;
         }
@@ -149,7 +149,7 @@ void _log(const char *file, int line, int panic, const char *fmt, ...)
 	gettimeofday(&tv,NULL);
 
     off = gf_strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S.", lt_ret);
-    gf_scnprintf(time_buf+off, sizeof(time_buf)-off, "%03ld", (int)tv.tv_usec/1000);
+    gf_scnprintf(time_buf+off, sizeof(time_buf)-off, "%03ld", (long)tv.tv_usec/1000);
 #ifdef GF_DEBUG_LOG
     len += gf_scnprintf(buf+len, size-len, "%s:%d ", file, line);
 #endif
@@ -175,35 +175,22 @@ void _log(const char *file, int line, int panic, const char *fmt, ...)
 void _log_stderr(const char *fmt, ...)
 {
     struct logger  *l = &logger;
-    int             len, size, errno_save, off, n;
-    char            buf[4*LOG_MAX_LEN];
-    char            time_buf[64];
+    int             len, size, errno_save;
+    char            buf[4 * LOG_MAX_LEN];
     va_list         args;
-    struct timeval  tv;
-    time_t          now;
-    struct tm       now_tm, *lt_ret;
-    const char      *c = ".-*#@!IDVWGP";
+    ssize_t         n;
 
     errno_save = errno;
-    len = 0;            /* length of output buffer */
-    size = LOG_MAX_LEN; /* size of output buffer */
-
-
-    /* get current time */
-	now = time(NULL);
-	lt_ret = localtime_r(&now, &now_tm);
-	gettimeofday(&tv,NULL);
-
-    off = gf_strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S.", lt_ret);
-    gf_scnprintf(time_buf+off, sizeof(time_buf)-off, "%03ld", (int)tv.tv_usec/1000);
+    len = 0;                /* length of output buffer */
+    size = 4 * LOG_MAX_LEN; /* size of output buffer */
 
     va_start(args, fmt);
-    len += gf_vscnprintf(buf+len, size-len, fmt, args);
+    len += gf_vscnprintf(buf, size, fmt, args);
     va_end(args);
-    buf[len++] = '\0';
 
-    n = dprintf(STDERR_FILENO, "\033[90m[%d]:%s %c \033[0m%s\n",
-            (int)getpid(), time_buf, c[l->level], buf);
+    buf[len++] = '\n';
+
+    n = gf_write(STDERR_FILENO, buf, len);
     if (n < 0) {
         l->nerror++;
     }
@@ -276,6 +263,62 @@ void _log_hexdump(const char *file, int line, const char *data, int datalen,
         if (n < 0) {
             l->nerror++;
         }
+    }
+
+    errno = errno_save;
+}
+
+void _log_safe(const char *fmt, ...) {
+    struct logger  *l = &logger;
+    int             len, size, errno_save;
+    char            buf[LOG_MAX_LEN];
+    va_list         args;
+    ssize_t         n;
+
+    if (l->fd < 0) {
+        return;
+    }
+
+    errno_save = errno;
+    len = 0;            /* length of output buffer */
+    size = LOG_MAX_LEN; /* size of output buffer */
+
+    len += gf_safe_snprintf(buf + len, size - len, "[.......................] ");
+
+    va_start(args, fmt);
+    len += gf_safe_vsnprintf(buf + len, size - len, fmt, args);
+    va_end(args);
+
+    buf[len++] = '\n';
+
+    n = gf_write(l->fd, buf, len);
+    if (n < 0) {
+        l->nerror++;
+    }
+
+    errno = errno_save;
+}
+
+void
+_log_stderr_safe(const char *fmt, ...)
+{
+    struct logger  *l = &logger;
+    int             len = 0, size = LOG_MAX_LEN, errno_save = errno;
+    char            buf[LOG_MAX_LEN];
+    va_list         args;
+    ssize_t         n;
+
+    len += gf_safe_snprintf(buf + len, size - len, "[.......................] ");
+
+    va_start(args, fmt);
+    len += gf_safe_vsnprintf(buf + len, size - len, fmt, args);
+    va_end(args);
+
+    buf[len++] = '\n';
+
+    n = gf_write(STDERR_FILENO, buf, len);
+    if (n < 0) {
+        l->nerror++;
     }
 
     errno = errno_save;

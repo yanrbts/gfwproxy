@@ -25,87 +25,53 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __GF_CORE_H__
-#define __GF_CORE_H__
+#ifndef _GF_MBUF_H_
+#define _GF_MBUF_H_
 
-#include <gf_auto_config.h>
+#include <gf_core.h>
 
-#ifdef HAVE_DEBUG_LOG
-# define GF_DEBUG_LOG 1
-#endif
+typedef void (*mbuf_copy_t)(struct mbuf *, void *);
 
-#ifdef HAVE_ASSERT_PANIC
-# define GF_ASSERT_PANIC 1
-#endif
+struct mbuf {
+    uint32_t           magic;   /* mbuf magic (const) */
+    STAILQ_ENTRY(mbuf) next;    /* next mbuf */
+    uint8_t            *pos;    /* read marker */
+    uint8_t            *last;   /* write marker */
+    uint8_t            *start;  /* start of buffer (const) */
+    uint8_t            *end;    /* end of buffer (const) */
+};
 
-#ifdef HAVE_ASSERT_LOG
-# define GF_ASSERT_LOG 1
-#endif
+STAILQ_HEAD(mhdr, mbuf);
 
-#ifdef HAVE_STATS
-# define GF_STATS 1
-#else
-# define GF_STATS 0
-#endif
+#define MBUF_MAGIC      0xdeadbeef
+#define MBUF_MIN_SIZE   512
+#define MBUF_MAX_SIZE   16777216
+#define MBUF_SIZE       16384
+#define MBUF_HSIZE      sizeof(struct mbuf)
 
-#ifdef HAVE_EPOLL
-# define GF_HAVE_EPOLL 1
-#elif HAVE_KQUEUE
-# define GF_HAVE_KQUEUE 1
-#elif HAVE_EVENT_PORTS
-# define GF_HAVE_EVENT_PORTS 1
-#else
-# error missing scalable I/O event notification mechanism
-#endif
+static inline bool
+mbuf_empty(const struct mbuf *mbuf)
+{
+    return mbuf->pos == mbuf->last;
+}
 
-#ifdef HAVE_LITTLE_ENDIAN
-# define GF_LITTLE_ENDIAN 1
-#endif
+static inline bool
+mbuf_full(const struct mbuf *mbuf)
+{
+    return mbuf->last == mbuf->end;
+}
 
-#ifdef HAVE_BACKTRACE
-# define GF_HAVE_BACKTRACE 1
-#endif
-
-#define GF_OK        0
-#define GF_ERROR    -1
-#define GF_EAGAIN   -2
-#define GF_ENOMEM   -3
-
-/* reserved fds for std streams, log, stats fd, epoll etc. */
-#define RESERVED_FDS 32
-
-typedef int rstatus_t; /* return type */
-typedef int err_t;     /* error type */
-
-struct array;
-struct mbuf;
-struct mhdr;
-
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <string.h>
-#include <stdio.h>
-#include <ctype.h>
-#include <errno.h>
-#include <limits.h>
-#include <time.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <stdlib.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <netinet/in.h>
-
-#include <gf_string.h>
-#include <gf_util.h>
-#include <gf_log.h>
-#include <gf_array.h>
-
+void mbuf_init(const struct instance *nci);
+void mbuf_deinit(void);
+struct mbuf *mbuf_get(void);
+void mbuf_put(struct mbuf *mbuf);
+void mbuf_rewind(struct mbuf *mbuf);
+uint32_t mbuf_length(const struct mbuf *mbuf);
+uint32_t mbuf_size(const struct mbuf *mbuf);
+size_t mbuf_data_size(void);
+void mbuf_insert(struct mhdr *mhdr, struct mbuf *mbuf);
+void mbuf_remove(struct mhdr *mhdr, struct mbuf *mbuf);
+void mbuf_copy(struct mbuf *mbuf, const uint8_t *pos, size_t n);
+struct mbuf *mbuf_split(struct mhdr *h, uint8_t *pos, mbuf_copy_t cb, void *cbarg);
 
 #endif

@@ -197,12 +197,66 @@ _safe_vsnprintf(char *to, size_t size, const char *format, va_list ap)
         case 'x':
         case 'p':
             {
+                int64_t ival = 0;
+                uint64_t uval = 0;
+                if (*format == 'p')
+                    have_longlong = (sizeof(void *) == sizeof(uint64_t));
+                if (have_longlong) {
+                    if (*format == 'u') {
+                        uval = va_arg(ap, uint64_t);
+                    } else {
+                        ival = va_arg(ap, int64_t);
+                    }
+                } else {
+                    if (*format == 'u') {
+                        uval = va_arg(ap, uint32_t);
+                    } else {
+                        ival = va_arg(ap, int32_t);
+                    }
+                }
 
+                {
+                    char buff[22];
+                    const int base = (*format == 'x' || *format == 'p') ? 16 : 10;
+
+                    /* *INDENT-OFF* */
+                    char *val_as_str = (*format == 'u') ?
+                        _safe_utoa(base, uval, &buff[sizeof(buff) - 1]) :
+                        _safe_itoa(base, ival, &buff[sizeof(buff) - 1]);
+                    
+                    /* Strip off "ffffffff" if we have 'x' format without 'll' */
+                    if (*format == 'x' && !have_longlong && ival < 0) {
+                        val_as_str += 8;
+                    }
+
+                    while (*val_as_str && to < end) {
+                        *to++ = *val_as_str++;
+                    }
+                    continue;
+                }
             }
         case 's':
             {
-                
+                const char *val = va_arg(ap, char *);
+                if (!val) {
+                    val = "(null)";
+                }
+                while (*val && to < end) {
+                    *to++ = *val++;
+                }
+                continue;
             }
         }
     }
+    *to = 0;
+    return (int)(to - start);
+}
+
+int _safe_snprintf(char *to, size_t n, const char *fmt, ...) {
+    int result;
+    va_list args;
+    va_start(args, fmt);
+    result = _safe_vsnprintf(to, n, fmt, args);
+    va_end(args);
+    return result;
 }

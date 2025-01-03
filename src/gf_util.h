@@ -212,4 +212,24 @@ int _gf_vscnprintf(char *buf, size_t size, const char *fmt, va_list args);
 int64_t gf_usec_now(void);
 int64_t gf_msec_now(void);
 
+/*
+ * Address resolution for internet (ipv4 and ipv6) and unix domain
+ * socket address.
+ */
+
+struct sockinfo {
+    int       family;              /* socket address family */
+    socklen_t addrlen;             /* socket address length */
+    union {
+        struct sockaddr_in  in;    /* ipv4 socket address */
+        struct sockaddr_in6 in6;   /* ipv6 socket address */
+        struct sockaddr_un  un;    /* unix domain address */
+    } addr;
+};
+
+int gf_resolve(const struct string *name, int port, struct sockinfo *si);
+const char *gf_unresolve_addr(struct sockaddr *addr, socklen_t addrlen);
+const char *gf_unresolve_peer_desc(int sd);
+const char *gf_unresolve_desc(int sd);
+
 #endif
