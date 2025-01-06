@@ -79,6 +79,9 @@ typedef int err_t;     /* error type */
 
 struct array;
 struct string;
+struct conn;
+struct conn_tqh;
+struct server;
 struct mbuf;
 struct mhdr;
 struct stats;
@@ -112,6 +115,7 @@ struct stats;
 #include <gf_stats.h>
 #include <gf_mbuf.h>
 #include <gf_rbtree.h>
-
+#include <gf_connection.h>
+#include <gf_server.h>
 
 #endif
