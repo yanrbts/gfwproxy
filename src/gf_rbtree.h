@@ -25,53 +25,33 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GF_MBUF_H_
-#define _GF_MBUF_H_
+#ifndef _GF_RBTREE_H_
+#define _GF_RBTREE_H_
 
-#include <gf_core.h>
+#define rbtree_red(_node)           ((_node)->color = 1)
+#define rbtree_black(_node)         ((_node)->color = 0)
+#define rbtree_is_red(_node)        ((_node)->color)
+#define rbtree_is_black(_node)      (!rbtree_is_red(_node))
+#define rbtree_copy_color(_n1, _n2) ((_n1)->color = (_n2)->color)
 
-typedef void (*mbuf_copy_t)(struct mbuf *, void *);
-
-struct mbuf {
-    uint32_t           magic;   /* mbuf magic (const) */
-    STAILQ_ENTRY(mbuf) next;    /* next mbuf */
-    uint8_t            *pos;    /* read marker */
-    uint8_t            *last;   /* write marker */
-    uint8_t            *start;  /* start of buffer (const) */
-    uint8_t            *end;    /* end of buffer (const) */
+struct rbnode {
+    struct rbnode *left;     /* left link */
+    struct rbnode *right;    /* right link */
+    struct rbnode *parent;   /* parent link */
+    int64_t       key;       /* key for ordering */
+    void          *data;     /* opaque data */
+    uint8_t       color;     /* red | black */
 };
 
-STAILQ_HEAD(mhdr, mbuf);
+struct rbtree {
+    struct rbnode *root;     /* root node */
+    struct rbnode *sentinel; /* nil node */
+};
 
-#define MBUF_MAGIC      0xdeadbeef
-#define MBUF_MIN_SIZE   512
-#define MBUF_MAX_SIZE   16777216
-#define MBUF_SIZE       16384
-#define MBUF_HSIZE      sizeof(struct mbuf)
-
-static inline bool
-mbuf_empty(const struct mbuf *mbuf)
-{
-    return mbuf->pos == mbuf->last;
-}
-
-static inline bool
-mbuf_full(const struct mbuf *mbuf)
-{
-    return mbuf->last == mbuf->end;
-}
-
-void mbuf_init(size_t cksize);
-void mbuf_deinit(void);
-struct mbuf *mbuf_get(void);
-void mbuf_put(struct mbuf *mbuf);
-void mbuf_rewind(struct mbuf *mbuf);
-uint32_t mbuf_length(const struct mbuf *mbuf);
-uint32_t mbuf_size(const struct mbuf *mbuf);
-size_t mbuf_data_size(void);
-void mbuf_insert(struct mhdr *mhdr, struct mbuf *mbuf);
-void mbuf_remove(struct mhdr *mhdr, struct mbuf *mbuf);
-void mbuf_copy(struct mbuf *mbuf, const uint8_t *pos, size_t n);
-struct mbuf *mbuf_split(struct mhdr *h, uint8_t *pos, mbuf_copy_t cb, void *cbarg);
+void rbtree_node_init(struct rbnode *node);
+void rbtree_init(struct rbtree *tree, struct rbnode *node);
+struct rbnode *rbtree_min(const struct rbtree *tree);
+void rbtree_insert(struct rbtree *tree, struct rbnode *node);
+void rbtree_delete(struct rbtree *tree, struct rbnode *node);
 
 #endif

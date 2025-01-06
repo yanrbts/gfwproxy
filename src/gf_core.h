@@ -78,8 +78,10 @@ typedef int rstatus_t; /* return type */
 typedef int err_t;     /* error type */
 
 struct array;
+struct string;
 struct mbuf;
 struct mhdr;
+struct stats;
 
 #include <stddef.h>
 #include <stdint.h>
@@ -106,6 +108,10 @@ struct mhdr;
 #include <gf_util.h>
 #include <gf_log.h>
 #include <gf_array.h>
+#include <gf_queue.h>
+#include <gf_stats.h>
+#include <gf_mbuf.h>
+#include <gf_rbtree.h>
 
 
 #endif

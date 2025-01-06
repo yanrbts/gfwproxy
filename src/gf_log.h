@@ -135,10 +135,10 @@ void log_level_set(int level);
 void log_stacktrace(void);
 void log_reopen(void);
 int log_loggable(int level);
-void _log(const char *file, int line, int panic, const char *fmt, ...) GF_ATTRIBUTE_FORMAT(printf, 4, 5);
-void _log_stderr(const char *fmt, ...) GF_ATTRIBUTE_FORMAT(printf, 1, 2);
-void _log_safe(const char *fmt, ...) GF_ATTRIBUTE_FORMAT(printf, 1, 2);
-void _log_stderr_safe(const char *fmt, ...) GF_ATTRIBUTE_FORMAT(printf, 1, 2);
+void _log(const char *file, int line, int panic, const char *fmt, ...)GF_ATTRIBUTE_FORMAT(printf, 4, 5);
+void _log_stderr(const char *fmt, ...)GF_ATTRIBUTE_FORMAT(printf, 1, 2);
+void _log_safe(const char *fmt, ...)GF_ATTRIBUTE_FORMAT(printf, 1, 2);
+void _log_stderr_safe(const char *fmt, ...)GF_ATTRIBUTE_FORMAT(printf, 1, 2);
 void _log_hexdump(const char *file, int line, const char *data, int datalen, const char *fmt, ...);
 
 #endif
