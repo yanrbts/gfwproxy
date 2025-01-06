@@ -108,4 +108,57 @@ stats_pool_metric_init(struct array *stats_metric)
 {
     rstatus_t status;
     uint32_t i, nfield = STATS_POOL_NFIELD;
+
+    status = array_init(stats_metric, nfield, sizeof(struct stats_metric));
+    if (status != GF_OK) {
+        return status;
+    }
+
+    for (i = 0; i < nfield; i++) {
+        struct stats_metric *stm = array_push(stats_metric);
+
+        /* initialize from pool codec first */
+        *stm = stats_pool_codec[i];
+
+        /* initialize individual metric */
+        stats_metric_init(stm);
+    }
+
+    return GF_OK;
+}
+
+static rstatus_t
+stats_server_metric_init(struct stats_server *sts)
+{
+    rstatus_t status;
+    uint32_t i, nfield = STATS_SERVER_NFIELD;
+
+    status = array_init(&sts->metric, nfield, sizeof(struct stats_metric));
+    if (status != GF_OK) {
+        return status;
+    }
+
+    for (i = 0; i < nfield; i++) {
+        struct stats_metric *stm = array_push(&sts->metric);
+
+        /* initialize from server codec first */
+        *stm = stats_server_codec[i];
+
+        /* initialize individual metric */
+        stats_metric_init(stm);
+    }
+
+    return GF_OK;
+}
+
+static void
+stats_metric_deinit(struct array *metric)
+{
+    uint32_t i, nmetric;
+
+    nmetric = array_n(metric);
+    for (i = 0; i < nmetric; i++) {
+        array_pop(metric);
+    }
+    array_deinit(metric);
 }
