@@ -82,9 +82,12 @@ struct string;
 struct conn;
 struct conn_tqh;
 struct server;
+struct server_pool;
 struct mbuf;
 struct mhdr;
 struct stats;
+struct instance;
+struct event_base;
 
 #include <stddef.h>
 #include <stdint.h>
@@ -112,10 +115,41 @@ struct stats;
 #include <gf_log.h>
 #include <gf_array.h>
 #include <gf_queue.h>
+#include <event/gf_event.h>
 #include <gf_stats.h>
 #include <gf_mbuf.h>
 #include <gf_rbtree.h>
 #include <gf_connection.h>
 #include <gf_server.h>
+
+struct context {
+    uint32_t           id;          /* unique context id */
+    struct conf        *cf;         /* configuration */
+    struct stats       *stats;      /* stats */
+
+    struct array       pool;        /* server_pool[] */
+    struct event_base  *evb;        /* event base */
+    int                max_timeout; /* max timeout in msec */
+    int                timeout;     /* timeout in msec */
+
+    uint32_t           max_nfd;     /* max # files */
+    uint32_t           max_ncconn;  /* max # client connections */
+    uint32_t           max_nsconn;  /* max # server connections */
+};
+
+struct instance {
+    struct context  *ctx;                        /* active context */
+    int             log_level;                   /* log level */
+    const char      *log_filename;               /* log filename */
+    const char      *conf_filename;              /* configuration filename */
+    uint16_t        stats_port;                  /* stats monitoring port */
+    int             stats_interval;              /* stats aggregation interval */
+    const char      *stats_addr;                 /* stats monitoring addr */
+    char            hostname[GF_MAXHOSTNAMELEN]; /* hostname */
+    size_t          mbuf_chunk_size;             /* mbuf chunk size */
+    pid_t           pid;                         /* process id */
+    const char      *pid_filename;               /* pid filename */
+    unsigned        pidfile:1;                   /* pid file created? */
+};
 
 #endif

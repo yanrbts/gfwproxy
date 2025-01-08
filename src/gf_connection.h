@@ -32,6 +32,15 @@
 
 struct conn {
     TAILQ_ENTRY(conn)   conn_tqe;        /* link in server_pool / server / free q */
+
+    int                 sd;              /* socket descriptor */
+
+    uint32_t            events;          /* connection io events */
+    err_t               err;             /* connection errno */
+    unsigned            recv_active:1;   /* recv active? */
+    unsigned            recv_ready:1;    /* recv ready? */
+    unsigned            send_active:1;   /* send active? */
+    unsigned            send_ready:1;    /* send ready? */
 };
 
 TAILQ_HEAD(conn_tqh, conn);
