@@ -57,13 +57,13 @@ stats_describe(void)
 {
     uint32_t i;
 
-    log_error("pool stats:");
+    log_stderr("pool stats:");
     for (i = 0; i < NELEMS(stats_pool_desc); i++) {
-        log_error("  %-20s\"%s\"", stats_pool_desc[i].name,
+        log_stderr("  %-20s\"%s\"", stats_pool_desc[i].name,
                    stats_pool_desc[i].desc);
     }
 
-    log_error("");
+    log_stderr("%s", "");
 
     log_stderr("server stats:");
     for (i = 0; i < NELEMS(stats_server_desc); i++) {
@@ -771,7 +771,7 @@ stats_send_rsp(struct stats *st)
 
     log_debug(LOG_VERB, "send stats on sd %d %zu bytes", sd, st->buf.len);
 
-    n = nc_sendn(sd, st->buf.data, st->buf.len);
+    n = gf_sendn(sd, st->buf.data, st->buf.len);
     if (n < 0) {
         log_error("send stats on sd %d failed: %s", sd, strerror(errno));
         close(sd);

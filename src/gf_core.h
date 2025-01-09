@@ -79,8 +79,11 @@ typedef int err_t;     /* error type */
 
 struct array;
 struct string;
+struct context;
 struct conn;
 struct conn_tqh;
+struct msg;
+struct msg_tqh;
 struct server;
 struct server_pool;
 struct mbuf;
@@ -119,12 +122,13 @@ struct event_base;
 #include <gf_stats.h>
 #include <gf_mbuf.h>
 #include <gf_rbtree.h>
+#include <gf_message.h>
 #include <gf_connection.h>
 #include <gf_server.h>
 
 struct context {
     uint32_t           id;          /* unique context id */
-    struct conf        *cf;         /* configuration */
+    // struct conf        *cf;         /* configuration */
     struct stats       *stats;      /* stats */
 
     struct array       pool;        /* server_pool[] */

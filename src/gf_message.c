@@ -462,3 +462,427 @@ msg_ensure_mbuf(struct msg *msg, size_t len)
 
     return mbuf;
 }
+
+/*
+ * Append n bytes of data, with n <= mbuf_size(mbuf)
+ * into mbuf
+ */
+rstatus_t
+msg_append(struct msg *msg, const uint8_t *pos, size_t n)
+{
+    struct mbuf *mbuf;
+
+    ASSERT(n <= mbuf_data_size());
+
+    mbuf = msg_ensure_mbuf(msg, n);
+    if (mbuf == NULL) {
+        return GF_ENOMEM;
+    }
+
+    ASSERT(n <= mbuf_size(mbuf));
+
+    mbuf_copy(mbuf, pos, n);
+    msg->mlen += (uint32_t)n;
+
+    return GF_OK;
+}
+
+rstatus_t
+msg_prepend(struct msg *msg, const uint8_t *pos, size_t n)
+{
+    struct mbuf *mbuf;
+
+    mbuf = mbuf_get();
+    if (mbuf == NULL) {
+        return GF_ENOMEM;
+    }
+
+    ASSERT(n <= mbuf_size(mbuf));
+
+    mbuf_copy(mbuf, pos, n);
+    msg->mlen += (uint32_t)n;
+
+    STAILQ_INSERT_HEAD(&msg->mhdr, mbuf, next);
+
+    return GF_OK;
+}
+
+/*
+ * Prepend a formatted string into msg. Returns an error if the formatted
+ * string does not fit in a single mbuf.
+ */
+rstatus_t
+msg_prepend_format(struct msg *msg, const char *fmt, ...)
+{
+    struct mbuf *mbuf;
+    int n;
+    uint32_t size;
+    va_list args;
+
+    mbuf = mbuf_get();
+    if (mbuf == NULL) {
+        return GF_ENOMEM;
+    }
+
+    size = mbuf_size(mbuf);
+
+    va_start(args, fmt);
+    n = gf_vsnprintf(mbuf->last, size, fmt, args);
+    va_end(args);
+
+    if (n < 0 || n >= (int)size) {
+        return GF_ERROR;
+    }
+
+    mbuf->last += n;
+    msg->mlen += (uint32_t)n;
+
+    STAILQ_INSERT_HEAD(&msg->mhdr, mbuf, next);
+
+    return GF_OK;
+}
+
+inline uint64_t
+msg_gen_frag_id(void)
+{
+    return ++frag_id;
+}
+
+static rstatus_t
+msg_parsed(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    struct msg *nmsg;
+    struct mbuf *mbuf, *nbuf;
+
+    mbuf = STAILQ_LAST(&msg->mhdr, mbuf, next);
+    if (msg->pos == mbuf->last) {
+        /* no more data to parse */
+        conn->recv_done(ctx, conn, msg, NULL);
+        return GF_OK;
+    }
+
+    /*
+     * Input mbuf has un-parsed data. Split mbuf of the current message msg
+     * into (mbuf, nbuf), where mbuf is the portion of the message that has
+     * been parsed and nbuf is the portion of the message that is un-parsed.
+     * Parse nbuf as a new message nmsg in the next iteration.
+     */
+    nbuf = mbuf_split(&msg->mhdr, msg->pos, NULL, NULL);
+    if (nbuf == NULL) {
+        return GF_ENOMEM;
+    }
+
+    nmsg = msg_get(msg->owner, msg->request, conn->redis);
+    if (nmsg == NULL) {
+        mbuf_put(nbuf);
+        return GF_ENOMEM;
+    }
+    mbuf_insert(&nmsg->mhdr, nbuf);
+    nmsg->pos = nbuf->pos;
+
+    /* update length of current (msg) and new message (nmsg) */
+    nmsg->mlen = mbuf_length(nbuf);
+    msg->mlen -= nmsg->mlen;
+
+    conn->recv_done(ctx, conn, msg, nmsg);
+
+    return GF_OK;
+}
+
+static rstatus_t
+msg_repair(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    struct mbuf *nbuf;
+
+    nbuf = mbuf_split(&msg->mhdr, msg->pos, NULL, NULL);
+    if (nbuf == NULL) {
+        return GF_ENOMEM;
+    }
+
+    mbuf_insert(&msg->mhdr, nbuf);
+    msg->pos = nbuf->pos;
+
+    return GF_OK;
+}
+
+static rstatus_t
+msg_parse(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    rstatus_t status;
+
+    if (msg_empty(msg)) {
+        /* no data to parse */
+        conn->recv_done(ctx, conn, msg, NULL);
+        return GF_OK;
+    }
+
+    msg->parser(msg);
+
+    switch (msg->result) {
+    case MSG_PARSE_OK:
+        status = msg_parsed(ctx, conn, msg);
+        break;
+
+    case MSG_PARSE_REPAIR:
+        status = msg_repair(ctx, conn, msg);
+        break;
+
+    case MSG_PARSE_AGAIN:
+        status = GF_OK;
+        break;
+
+    default:
+        status = GF_ERROR;
+        conn->err = errno;
+        break;
+    }
+
+    return conn->err != 0 ? GF_ERROR : status;
+}
+
+static rstatus_t
+msg_recv_chain(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    rstatus_t status;
+    struct msg *nmsg;
+    struct mbuf *mbuf;
+    size_t msize;
+    ssize_t n;
+
+    mbuf = STAILQ_LAST(&msg->mhdr, mbuf, next);
+    if (mbuf == NULL || mbuf_full(mbuf)) {
+        mbuf = mbuf_get();
+        if (mbuf == NULL) {
+            return GF_ENOMEM;
+        }
+        mbuf_insert(&msg->mhdr, mbuf);
+        msg->pos = mbuf->pos;
+    }
+    ASSERT(mbuf->end - mbuf->last > 0);
+
+    msize = mbuf_size(mbuf);
+
+    n = conn_recv(conn, mbuf->last, msize);
+    if (n < 0) {
+        if (n == GF_EAGAIN) {
+            return GF_OK;
+        }
+        return GF_ERROR;
+    }
+
+    ASSERT((mbuf->last+n) <= mbuf->end);
+    mbuf->last += n;
+    msg->mlen += (uint32_t)n;
+
+    for (;;) {
+        status = msg_parse(ctx, conn, msg);
+        if (status != GF_OK) {
+            return status;
+        }
+
+        /* get next message to parse */
+        nmsg = conn->recv_next(ctx, conn, false);
+        if (nmsg == NULL || nmsg == msg) {
+            /* no more data to parse */
+            break;
+        }
+
+        msg = nmsg;
+    }
+    return GF_OK;
+}
+
+rstatus_t
+msg_recv(struct context *ctx, struct conn *conn)
+{
+    rstatus_t status;
+    struct msg *msg;
+
+    ASSERT(conn->recv_active);
+
+    conn->recv_ready = 1;
+    do {
+        msg = conn->recv_next(ctx, conn, true);
+        if (msg == NULL) {
+            return NC_OK;
+        }
+
+        status = msg_recv_chain(ctx, conn, msg);
+        if (status != NC_OK) {
+            return status;
+        }
+    } while (conn->recv_ready);
+
+    return NC_OK;
+}
+
+static rstatus_t
+msg_send_chain(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    struct msg_tqh send_msgq;            /* send msg q */
+    struct msg *nmsg;                    /* next msg */
+    struct mbuf *mbuf, *nbuf;            /* current and next mbuf */
+    size_t mlen;                         /* current mbuf data length */
+    struct iovec *ciov, iov[GF_IOV_MAX]; /* current iovec */
+    struct array sendv;                  /* send iovec */
+    size_t nsend, nsent;                 /* bytes to send; bytes sent */
+    size_t limit;                        /* bytes to send limit */
+    ssize_t n;                           /* bytes sent by sendv */
+
+    TAILQ_INIT(&send_msgq);
+
+    array_set(&sendv, iov, sizeof(iov[0]), GF_IOV_MAX);
+
+    /* preprocess - build iovec */
+
+    nsend = 0;
+    /*
+     * readv() and writev() returns EINVAL if the sum of the iov_len values
+     * overflows an ssize_t value Or, the vector count iovcnt is less than
+     * zero or greater than the permitted maximum.
+     */
+    limit = SSIZE_MAX;
+
+    for (;;) {
+        ASSERT(conn->smsg == msg);
+
+        TAILQ_INSERT_TAIL(&send_msgq, msg, m_tqe);
+
+        for (mbuf = STAILQ_FIRST(&msg->mhdr);
+             mbuf != NULL && array_n(&sendv) < GF_IOV_MAX && nsend < limit;
+             mbuf = nbuf)
+        {
+            nbuf = STAILQ_NEXT(mbuf, next);
+
+            if (mbuf_empty(mbuf)) {
+                continue;
+            }
+
+            mlen = mbuf_length(mbuf);
+            if ((nsend + mlen) > limit) {
+                mlen = limit - nsend;
+            }
+
+            ciov = array_push(&sendv);
+            ciov->iov_base = mbuf->pos;
+            ciov->iov_len = mlen;
+
+            nsend += mlen;
+        }
+
+        if (array_n(&sendv) >= GF_IOV_MAX || nsend >= limit) {
+            break;
+        }
+
+        msg = conn->send_next(ctx, conn);
+        if (msg == NULL) {
+            break;
+        }
+    }
+
+    /*
+     * (nsend == 0) is possible in redis multi-del
+     * see PR: https://github.com/twitter/twemproxy/pull/225
+     */
+    conn->smsg = NULL;
+    if (!TAILQ_EMPTY(&send_msgq) && nsend != 0) {
+        n = conn_sendv(conn, &sendv, nsend);
+    } else {
+        n = 0;
+    }
+
+    nsent = n > 0 ? (size_t)n : 0;
+
+    /* postprocess - process sent messages in send_msgq */
+
+    for (msg = TAILQ_FIRST(&send_msgq); msg != NULL; msg = nmsg) {
+        nmsg = TAILQ_NEXT(msg, m_tqe);
+
+        TAILQ_REMOVE(&send_msgq, msg, m_tqe);
+
+        if (nsent == 0) {
+            if (msg->mlen == 0) {
+                conn->send_done(ctx, conn, msg);
+            }
+            continue;
+        }
+
+        /* adjust mbufs of the sent message */
+        for (mbuf = STAILQ_FIRST(&msg->mhdr); mbuf != NULL; mbuf = nbuf) {
+            nbuf = STAILQ_NEXT(mbuf, next);
+
+            if (mbuf_empty(mbuf)) {
+                continue;
+            }
+
+            mlen = mbuf_length(mbuf);
+            if (nsent < mlen) {
+                /* mbuf was sent partially; process remaining bytes later */
+                mbuf->pos += nsent;
+                ASSERT(mbuf->pos < mbuf->last);
+                nsent = 0;
+                break;
+            }
+
+            /* mbuf was sent completely; mark it empty */
+            mbuf->pos = mbuf->last;
+            nsent -= mlen;
+        }
+
+        /* message has been sent completely, finalize it */
+        if (mbuf == NULL) {
+            conn->send_done(ctx, conn, msg);
+        }
+    }
+
+    ASSERT(TAILQ_EMPTY(&send_msgq));
+
+    if (n >= 0) {
+        return GF_OK;
+    }
+
+    return (n == GF_EAGAIN) ? GF_OK : GF_ERROR;
+}
+
+rstatus_t
+msg_send(struct context *ctx, struct conn *conn)
+{
+    rstatus_t status;
+    struct msg *msg;
+
+    ASSERT(conn->send_active);
+
+    conn->send_ready = 1;
+    do {
+        msg = conn->send_next(ctx, conn);
+        if (msg == NULL) {
+            /* nothing to send */
+            return GF_OK;
+        }
+
+        status = msg_send_chain(ctx, conn, msg);
+        if (status != GF_OK) {
+            return status;
+        }
+
+    } while (conn->send_ready);
+
+    return GF_OK;
+}
+
+/*
+ * Set a placeholder key for a command with no key that is forwarded to an
+ * arbitrary backend.
+ */
+bool msg_set_placeholder_key(struct msg *r)
+{
+    struct keypos *kpos;
+    ASSERT(array_n(r->keys) == 0);
+    kpos = array_push(r->keys);
+    if (kpos == NULL) {
+        return false;
+    }
+    kpos->start = (uint8_t *)"placeholder";
+    kpos->end = kpos->start + sizeof("placeholder") - 1;
+    return true;
+}
