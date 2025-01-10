@@ -112,6 +112,7 @@ struct event_base;
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <netinet/in.h>
+#include <sys/uio.h>
 
 #include <gf_string.h>
 #include <gf_util.h>

@@ -50,7 +50,7 @@ typedef void (*conn_swallow_msg_t)(struct conn *, struct msg *, struct msg *);
 
 struct conn {
     TAILQ_ENTRY(conn)   conn_tqe;        /* link in server_pool / server / free q */
-void                *owner;          /* connection owner - server_pool / server */
+    void                *owner;          /* connection owner - server_pool / server */
 
     int                 sd;              /* socket descriptor */
     int                 family;          /* socket address family */
@@ -102,5 +102,18 @@ void                *owner;          /* connection owner - server_pool / server 
 };
 
 TAILQ_HEAD(conn_tqh, conn);
+
+struct context *conn_to_ctx(const struct conn *conn);
+struct conn *conn_get(void *owner, bool client, bool redis);
+struct conn *conn_get_proxy(struct server_pool *pool);
+void conn_put(struct conn *conn);
+ssize_t conn_recv(struct conn *conn, void *buf, size_t size);
+ssize_t conn_sendv(struct conn *conn, const struct array *sendv, size_t nsend);
+void conn_init(void);
+void conn_deinit(void);
+uint32_t conn_ncurr_conn(void);
+uint64_t conn_ntotal_conn(void);
+uint32_t conn_ncurr_cconn(void);
+bool conn_authenticated(const struct conn *conn);
 
 #endif

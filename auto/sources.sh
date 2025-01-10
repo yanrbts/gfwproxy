@@ -29,7 +29,8 @@ CORE_SRCS="src/gfw.c        \
            src/gf_message.c \
            src/event/gf_epoll.c \
            src/event/gf_evport.c \
-           src/event/gf_kqueue.c"
+           src/event/gf_kqueue.c \
+           src/gf_request.c"
 
 UNIX_INCS="$CORE_INCS"
 

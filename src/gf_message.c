@@ -25,10 +25,11 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/uio.h>
 #include <gf_core.h>
+
+#ifndef IOV_MAX
+#define IOV_MAX 1024
+#endif
 
 #if (IOV_MAX > 128)
 #define GF_IOV_MAX 128
@@ -387,9 +388,9 @@ msg_dump(const struct msg *msg, int level)
         return;
     }
 
-    loga("msg dump id %"PRIu64" request %d len %"PRIu32" type %d done %d "
-         "error %d (err %d)", msg->id, msg->request, msg->mlen, msg->type,
-         msg->done, msg->error, msg->err);
+    // loga("msg dump id %"PRIu64" request %d len %"PRIu32" type %d done %d "
+    //      "error %d (err %d)", msg->id, msg->request, msg->mlen, msg->type,
+    //      msg->done, msg->error, msg->err);
 
     STAILQ_FOREACH(mbuf, &msg->mhdr, next) {
         uint8_t *p, *q;
@@ -704,16 +705,16 @@ msg_recv(struct context *ctx, struct conn *conn)
     do {
         msg = conn->recv_next(ctx, conn, true);
         if (msg == NULL) {
-            return NC_OK;
+            return GF_OK;
         }
 
         status = msg_recv_chain(ctx, conn, msg);
-        if (status != NC_OK) {
+        if (status != GF_OK) {
             return status;
         }
     } while (conn->recv_ready);
 
-    return NC_OK;
+    return GF_OK;
 }
 
 static rstatus_t
