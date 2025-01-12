@@ -164,3 +164,52 @@ _conn_get(void)
 
     return conn;
 }
+
+struct conn *
+conn_get(void *owner, bool client, bool redis)
+{
+    struct conn *conn;
+
+    conn = _conn_get();
+    if (conn == NULL) {
+        return NULL;
+    }
+
+    /* connection either handles redis or memcache messages */
+    conn->redis = redis ? 1 : 0;
+    conn->client = client ? 1 : 0;
+
+    if (conn->client) {
+        /*
+         * client receives a request, possibly parsing it, and sends a
+         * response downstream.
+         */
+        conn->recv = msg_recv;
+        conn->recv_next = req_recv_next;
+        conn->recv_done = req_recv_done;
+
+        conn->send = msg_send;
+        conn->send_next = rsp_send_next;
+        conn->send_done = rsp_send_done;
+
+        conn->close = client_close;
+        conn->active = client_active;
+
+        conn->ref = client_ref;
+        conn->unref = client_unref;
+
+        conn->enqueue_inq = NULL;
+        conn->dequeue_inq = NULL;
+        conn->enqueue_outq = req_client_enqueue_omsgq;
+        conn->dequeue_outq = req_client_dequeue_omsgq;
+        conn->post_connect = NULL;
+        conn->swallow_msg = NULL;
+
+        ncurr_cconn++;
+    } else {
+        /*
+         * server receives a response, possibly parsing it, and sends a
+         * request upstream.
+         */
+    }
+}

@@ -25,4 +25,14 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+#ifndef __GF_CLIENT_H__
+#define __GF_CLIENT_H__
+
 #include <gf_core.h>
+
+bool client_active(const struct conn *conn);
+void client_ref(struct conn *conn, void *owner);
+void client_unref(struct conn *conn);
+void client_close(struct context *ctx, struct conn *conn);
+
+#endif

@@ -126,6 +126,7 @@ struct event_base;
 #include <gf_message.h>
 #include <gf_connection.h>
 #include <gf_server.h>
+#include <gf_client.h>
 
 struct context {
     uint32_t           id;          /* unique context id */

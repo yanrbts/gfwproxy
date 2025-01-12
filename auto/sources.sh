@@ -14,7 +14,8 @@ CORE_DEPS="src/gf_core.h    \
            src/gf_connection.h \
            src/gf_server.h  \
            src/gf_message.h \
-           src/event/gf_event.h"
+           src/event/gf_event.h \
+           src/gf_client.h"
 
 CORE_SRCS="src/gfw.c        \
            src/gf_util.c    \
@@ -30,7 +31,8 @@ CORE_SRCS="src/gfw.c        \
            src/event/gf_epoll.c \
            src/event/gf_evport.c \
            src/event/gf_kqueue.c \
-           src/gf_request.c"
+           src/gf_request.c \
+           src/gf_client.c"
 
 UNIX_INCS="$CORE_INCS"
 
