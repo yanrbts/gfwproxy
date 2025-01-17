@@ -1,6 +1,7 @@
 # Copyright (C) Yan Ruibing
 
-CORE_INCS="src"
+CORE_INCS="src \
+           contrib/yaml-0.2.5/include"
 
 CORE_DEPS="src/gf_core.h    \
            src/gf_queue.h   \

@@ -4,6 +4,12 @@
 LC_ALL=C
 export LC_ALL
 
+tar xvfz contrib/yaml-0.2.5.tar.gz -C contrib
+cd contrib/yaml-0.2.5
+./configure
+make
+cd ../../
+
 . auto/options.sh
 . auto/init.sh
 . auto/sources.sh

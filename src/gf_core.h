@@ -88,6 +88,7 @@ struct server;
 struct server_pool;
 struct mbuf;
 struct mhdr;
+struct conf;
 struct stats;
 struct instance;
 struct event_base;
