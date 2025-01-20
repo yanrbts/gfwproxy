@@ -949,3 +949,833 @@ conf_validate_tokens(struct conf *cf)
 
     return !error ? GF_OK : GF_ERROR;
 }
+
+static rstatus_t
+conf_validate_structure(struct conf *cf)
+{
+    rstatus_t status;
+    int type, depth;
+    uint32_t i, count[CONF_MAX_DEPTH+1];
+    bool done, error, seq;
+
+    status = conf_yaml_init(cf);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    done = false;
+    error = false;
+    seq = false;
+    depth = 0;
+
+    for (i = 0; i < CONF_MAX_DEPTH+1; i++) {
+        count[i] = 0;
+    }
+
+    /*
+     * Validate that the configuration conforms roughly to the following
+     * yaml tree structure:
+     *
+     * keyx:
+     *   key1: value1
+     *   key2: value2
+     *   seq:
+     *     - elem1
+     *     - elem2
+     *     - elem3
+     *   key3: value3
+     *
+     * keyy:
+     *   key1: value1
+     *   key2: value2
+     *   seq:
+     *     - elem1
+     *     - elem2
+     *     - elem3
+     *   key3: value3
+     */
+    do {
+        status = conf_event_next(cf);
+        if (status != GF_OK) {
+            return status;
+        }
+
+        type = cf->event.type;
+
+        log_debug(LOG_VVERB, "next event %d depth %d seq %d", type, depth, seq);
+
+        switch (type) {
+        case YAML_STREAM_START_EVENT:
+        case YAML_DOCUMENT_START_EVENT:
+            break;
+        case YAML_DOCUMENT_END_EVENT:
+            break;
+        case YAML_STREAM_END_EVENT:
+            done = true;
+            break;
+        case YAML_MAPPING_START_EVENT:
+            if (depth == CONF_ROOT_DEPTH && count[depth] != 1) {
+                error = true;
+                log_error("conf: '%s' has more than one \"key:value\" at depth"
+                          " %d", cf->fname, depth);
+            } else if (depth >= CONF_MAX_DEPTH) {
+                error = true;
+                log_error("conf: '%s' has a depth greater than %d", cf->fname,
+                          CONF_MAX_DEPTH);
+            }
+            depth++;
+            break;
+        case YAML_MAPPING_END_EVENT:
+            if (depth == CONF_MAX_DEPTH) {
+                if (seq) {
+                    seq = false;
+                } else {
+                    error = true;
+                    log_error("conf: '%s' missing sequence directive at depth "
+                              "%d", cf->fname, depth);
+                }
+            }
+            depth--;
+            count[depth] = 0;
+            break;
+        case YAML_SEQUENCE_START_EVENT:
+            if (seq) {
+                error = true;
+                log_error("conf: '%s' has more than one sequence directive",
+                          cf->fname);
+            } else if (depth != CONF_MAX_DEPTH) {
+                error = true;
+                log_error("conf: '%s' has sequence at depth %d instead of %d",
+                          cf->fname, depth, CONF_MAX_DEPTH);
+            } else if (count[depth] != 1) {
+                error = true;
+                log_error("conf: '%s' has invalid \"key:value\" at depth %d",
+                          cf->fname, depth);
+            }
+            seq = true;
+            break;
+        case YAML_SEQUENCE_END_EVENT:
+            ASSERT(depth == CONF_MAX_DEPTH);
+            count[depth] = 0;
+            break;
+        case YAML_SCALAR_EVENT:
+            if (depth == 0) {
+                error = true;
+                log_error("conf: '%s' has invalid empty \"key:\" at depth %d",
+                          cf->fname, depth);
+            } else if (depth == CONF_ROOT_DEPTH && count[depth] != 0) {
+                error = true;
+                log_error("conf: '%s' has invalid mapping \"key:\" at depth %d",
+                          cf->fname, depth);
+            } else if (depth == CONF_MAX_DEPTH && count[depth] == 2) {
+                /* found a "key: value", resetting! */
+                count[depth] = 0;
+            }
+            count[depth]++;
+            break;
+        default:
+            NOT_REACHED();
+        }
+
+        conf_event_done(cf);
+    } while (!done && !error);
+
+    conf_yaml_deinit(cf);
+
+    return !error ? GF_OK : GF_ERROR;
+}
+
+static rstatus_t
+conf_pre_validate(struct conf *cf)
+{
+    rstatus_t status;
+
+    status = conf_validate_document(cf);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    status = conf_validate_tokens(cf);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    status = conf_validate_structure(cf);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    cf->sound = 1;
+
+    return GF_OK;
+}
+
+static int
+conf_server_name_cmp(const void *t1, const void *t2)
+{
+    const struct conf_server *s1 = t1, *s2 = t2;
+
+    return string_compare(&s1->name, &s2->name);
+}
+
+static int
+conf_pool_name_cmp(const void *t1, const void *t2)
+{
+    const struct conf_pool *p1 = t1, *p2 = t2;
+
+    return string_compare(&p1->name, &p2->name);
+}
+
+static int
+conf_pool_listen_cmp(const void *t1, const void *t2)
+{
+    const struct conf_pool *p1 = t1, *p2 = t2;
+
+    return string_compare(&p1->listen.pname, &p2->listen.pname);
+}
+
+static rstatus_t
+conf_validate_server(struct conf *cf, struct conf_pool *cp)
+{
+    uint32_t i, nserver;
+    bool valid;
+
+    nserver = array_n(&cp->server);
+    if (nserver == 0) {
+        log_error("conf: pool '%.*s' has no servers", cp->name.len,
+                  cp->name.data);
+        return GF_ERROR;
+    }
+
+    /*
+     * Disallow duplicate servers - servers with identical "host:port:weight"
+     * or "name" combination are considered as duplicates. When server name
+     * is configured, we only check for duplicate "name" and not for duplicate
+     * "host:port:weight"
+     */
+    array_sort(&cp->server, conf_server_name_cmp);
+    for (valid = true, i = 0; i < nserver-1; i++) {
+        struct conf_server *cs1, *cs2;
+
+        cs1 = array_get(&cp->server, i);
+        cs2 = array_get(&cp->server, i+1);
+
+        if (string_compare(&cs1->name, &cs2->name) == 0) {
+            log_error("conf: pool '%.*s' has servers with same name '%.*s'",
+                      cp->name.len, cp->name.data, cs1->name.len,
+                      cs1->name.data);
+            valid = false;
+            break;
+        }
+    }
+
+    return valid ? GF_OK : GF_ERROR;
+}
+
+static rstatus_t
+conf_validate_pool(struct conf *cf, struct conf_pool *cp)
+{
+    rstatus_t status;
+
+    ASSERT(!cp->valid);
+    ASSERT(!string_empty(&cp->name));
+
+    if (!cp->listen.valid) {
+        log_error("conf: directive \"listen:\" is missing");
+        return GF_ERROR;
+    }
+
+    /* set default values for unset directives */
+    if (cp->distribution == CONF_UNSET_DIST) {
+        cp->distribution = CONF_DEFAULT_DIST;
+    }
+
+    if (cp->hash == CONF_UNSET_HASH) {
+        cp->hash = CONF_DEFAULT_HASH;
+    }
+
+    if (cp->timeout == CONF_UNSET_NUM) {
+        cp->timeout = CONF_DEFAULT_TIMEOUT;
+    }
+
+    if (cp->backlog == CONF_UNSET_NUM) {
+        cp->backlog = CONF_DEFAULT_LISTEN_BACKLOG;
+    }
+
+    cp->client_connections = CONF_DEFAULT_CLIENT_CONNECTIONS;
+
+    if (cp->redis == CONF_UNSET_NUM) {
+        cp->redis = CONF_DEFAULT_REDIS;
+    }
+
+    if (cp->tcpkeepalive == CONF_UNSET_NUM) {
+        cp->tcpkeepalive = CONF_DEFAULT_TCPKEEPALIVE;
+    }
+
+    if (cp->reuseport == CONF_UNSET_NUM) {
+	    cp->reuseport = CONF_DEFAULT_REUSEPORT;
+    }
+
+    if (cp->redis_db == CONF_UNSET_NUM) {
+        cp->redis_db = CONF_DEFAULT_REDIS_DB;
+    }
+
+    if (cp->preconnect == CONF_UNSET_NUM) {
+        cp->preconnect = CONF_DEFAULT_PRECONNECT;
+    }
+
+    if (cp->auto_eject_hosts == CONF_UNSET_NUM) {
+        cp->auto_eject_hosts = CONF_DEFAULT_AUTO_EJECT_HOSTS;
+    }
+
+    if (cp->server_connections == CONF_UNSET_NUM) {
+        cp->server_connections = CONF_DEFAULT_SERVER_CONNECTIONS;
+    } else if (cp->server_connections == 0) {
+        log_error("conf: directive \"server_connections:\" cannot be 0");
+        return GF_ERROR;
+    }
+
+    if (cp->server_retry_timeout == CONF_UNSET_NUM) {
+        cp->server_retry_timeout = CONF_DEFAULT_SERVER_RETRY_TIMEOUT;
+    }
+
+    if (cp->server_failure_limit == CONF_UNSET_NUM) {
+        cp->server_failure_limit = CONF_DEFAULT_SERVER_FAILURE_LIMIT;
+    }
+
+    if (!cp->redis && cp->redis_auth.len > 0) {
+        log_error("conf: directive \"redis_auth:\" is only valid for a redis pool");
+        return GF_ERROR;
+    }
+
+    status = conf_validate_server(cf, cp);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    cp->valid = 1;
+
+    return GF_OK;
+}
+
+static rstatus_t
+conf_post_validate(struct conf *cf)
+{
+    rstatus_t status;
+    uint32_t i, npool;
+    bool valid;
+
+    ASSERT(cf->sound && cf->parsed);
+    ASSERT(!cf->valid);
+
+    npool = array_n(&cf->pool);
+    if (npool == 0) {
+        log_error("conf: '%s' has no pools", cf->fname);
+        return GF_ERROR;
+    }
+
+    /* validate pool */
+    for (i = 0; i < npool; i++) {
+        struct conf_pool *cp = array_get(&cf->pool, i);
+
+        status = conf_validate_pool(cf, cp);
+        if (status != GF_OK) {
+            return status;
+        }
+    }
+
+    /* disallow pools with duplicate listen: key values */
+    array_sort(&cf->pool, conf_pool_listen_cmp);
+    for (valid = true, i = 0; i < npool-1; i++) {
+        struct conf_pool *p1, *p2;
+
+        p1 = array_get(&cf->pool, i);
+        p2 = array_get(&cf->pool, i+1);
+
+        if (string_compare(&p1->listen.pname, &p2->listen.pname) == 0) {
+            log_error("conf: pools '%.*s' and '%.*s' have the same listen "
+                      "address '%.*s'", p1->name.len, p1->name.data,
+                      p2->name.len, p2->name.data, p1->listen.pname.len,
+                      p1->listen.pname.data);
+            valid = false;
+            break;
+        }
+    }
+    if (!valid) {
+        return GF_ERROR;
+    }
+
+    /* disallow pools with duplicate names */
+    array_sort(&cf->pool, conf_pool_name_cmp);
+    for (valid = true, i = 0; i < npool-1; i++) {
+        struct conf_pool *p1, *p2;
+
+        p1 = array_get(&cf->pool, i);
+        p2 = array_get(&cf->pool, i+1);
+
+        if (string_compare(&p1->name, &p2->name) == 0) {
+            log_error("conf: '%s' has pools with same name %.*s'", cf->fname,
+                      p1->name.len, p1->name.data);
+            valid = false;
+            break;
+        }
+    }
+    if (!valid) {
+        return GF_ERROR;
+    }
+
+    return GF_OK;
+}
+
+struct conf *
+conf_create(const char *filename)
+{
+    rstatus_t status;
+    struct conf *cf;
+
+    cf = conf_open(filename);
+    if (cf == NULL) {
+        return NULL;
+    }
+
+    /* validate configuration file before parsing */
+    status = conf_pre_validate(cf);
+    if (status != GF_OK) {
+        goto error;
+    }
+
+    /* parse the configuration file */
+    status = conf_parse(cf);
+    if (status != GF_OK) {
+        goto error;
+    }
+
+    /* validate parsed configuration */
+    status = conf_post_validate(cf);
+    if (status != GF_OK) {
+        goto error;
+    }
+
+    conf_dump(cf);
+
+    fclose(cf->fh);
+    cf->fh = NULL;
+
+    return cf;
+
+error:
+    log_stderr("gfw: configuration file '%s' syntax is invalid", filename);
+    fclose(cf->fh);
+    cf->fh = NULL;
+    conf_destroy(cf);
+    return NULL;
+}
+
+void
+conf_destroy(struct conf *cf)
+{
+    while (array_n(&cf->arg) != 0) {
+        conf_pop_scalar(cf);
+    }
+    array_deinit(&cf->arg);
+
+    while (array_n(&cf->pool) != 0) {
+        conf_pool_deinit(array_pop(&cf->pool));
+    }
+    array_deinit(&cf->pool);
+
+    gf_free(cf);
+}
+
+const char *
+conf_set_string(struct conf *cf, const struct command *cmd, void *conf)
+{
+    rstatus_t status;
+    uint8_t *p;
+    struct string *field;
+    const struct string *value;
+
+    p = conf;
+    field = (struct string *)(p+cmd->offset);
+
+    if (field->data != CONF_UNSET_PTR) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+    status = string_duplicate(field, value);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    return CONF_OK;
+}
+
+const char *
+conf_set_listen(struct conf *cf, const struct command *cmd, void *conf)
+{
+    rstatus_t status;
+    struct string *value;
+    struct conf_listen *field;
+    uint8_t *p, *name;
+    uint32_t namelen;
+
+    p = conf;
+    field = (struct conf_listen *)(p+cmd->offset);
+
+    if (field->valid == 1) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+
+    status = string_duplicate(&field->pname, value);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    if (value->data[0] == '/') {
+        uint8_t *q, *start, *perm;
+
+        /* parse "socket_path permissions" from the end */
+        p = value->data + value->len - 1;
+        start = value->data;
+        q = gf_strrchr(p, start, ' ');
+
+        if (q == NULL) {
+            /* no permissions field, so use defaults */
+            name = value->data;
+            namelen = value->len;
+            field->perm = (mode_t)0;
+        } else {
+            perm = q + 1;
+            p = q - 1;
+            name = start;
+            namelen = (uint32_t)(p-start+1);
+
+            errno = 0;
+            field->perm = (mode_t)strtol((char*)perm, NULL, 8);
+            if (errno || field->perm > 0777) {
+                return "has an invalid file permission in \"socket_path permission\" format string";
+            }
+        }
+    } else {
+        uint8_t *q, *start, *port;
+        uint32_t portlen;
+
+        /* parse "hostname:port" from the end */
+        p = value->data + value->len - 1;
+        start = value->data;
+        q = gf_strrchr(p, start, ':');
+        if (q == NULL) {
+            return "has an invalid \"hostname:port\" format string";
+        }
+
+        port = q + 1;
+        portlen = (uint32_t)(p-port+1);
+
+        p = q - 1;
+
+        name = start;
+        namelen = (uint32_t)(p-start+1);
+
+        field->port = gf_atoi(port, portlen);
+        if (field->port < 0 || !gf_valid_port(field->port)) {
+            return "has an invalid port in \"hostname:port\" format string";
+        }
+    }
+
+    status = string_copy(&field->name, name, namelen);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    status = gf_resolve(&field->name, field->port, &field->info);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    field->valid = 1;
+
+    return CONF_OK;
+}
+
+const char *
+conf_add_server(struct conf *cf, const struct command *cmd, void *conf)
+{
+    rstatus_t status;
+    struct array *a;
+    struct string *value;
+    struct conf_server *field;
+    uint8_t *p, *q, *start;
+    uint8_t *pname, *addr, *port, *weight, *name;
+    uint32_t k, delimlen, pnamelen, addrlen, portlen, weightlen, namelen;
+    const char *const delim = " ::";
+
+    p = conf;
+    a = (struct array *)(p + cmd->offset);
+
+    field = array_push(a);
+    if (field == NULL) {
+        return CONF_ERROR;
+    }
+
+    conf_server_init(field);
+
+    value = array_top(&cf->arg);
+
+    /* parse "hostname:port:weight [name]" or "/path/unix_socket:weight [name]" from the end */
+    p = value->data + value->len - 1;
+    start = value->data;
+    addr = NULL;
+    addrlen = 0;
+    weight = NULL;
+    weightlen = 0;
+    port = NULL;
+    portlen = 0;
+    name = NULL;
+    namelen = 0;
+
+    delimlen = value->data[0] == '/' ? 2 : 3;
+
+    for (k = 0; k < sizeof(delim); k++) {
+        q = gf_strrchr(p, start, delim[k]);
+        if (q == NULL) {
+            if (k == 0) {
+                /*
+                 * name in "hostname:port:weight [name]" format string is
+                 * optional
+                 */
+                continue;
+            }
+            break;
+        }
+
+        switch (k) {
+        case 0:
+            name = q + 1;
+            namelen = (uint32_t)(p - name + 1);
+            break;
+
+        case 1:
+            weight = q + 1;
+            weightlen = (uint32_t)(p - weight + 1);
+            break;
+
+        case 2:
+            port = q + 1;
+            portlen = (uint32_t)(p - port + 1);
+            break;
+
+        default:
+            NOT_REACHED();
+        }
+
+        p = q - 1;
+    }
+
+    if (k != delimlen) {
+        return "has an invalid \"hostname:port:weight [name]\"or \"/path/unix_socket:weight [name]\" format string";
+    }
+
+    pname = value->data;
+    pnamelen = namelen > 0 ? value->len - (namelen + 1) : value->len;
+    status = string_copy(&field->pname, pname, pnamelen);
+    if (status != GF_OK) {
+        array_pop(a);
+        return CONF_ERROR;
+    }
+
+    addr = start;
+    addrlen = (uint32_t)(p - start + 1);
+
+    field->weight = gf_atoi(weight, weightlen);
+    if (field->weight < 0) {
+        return "has an invalid weight in \"hostname:port:weight [name]\" format string";
+    } else if (field->weight == 0) {
+        return "has a zero weight in \"hostname:port:weight [name]\" format string";
+    }
+
+    if (value->data[0] != '/') {
+        field->port = gf_atoi(port, portlen);
+        if (field->port < 0 || !nc_valid_port(field->port)) {
+            return "has an invalid port in \"hostname:port:weight [name]\" format string";
+        }
+    }
+
+    if (name == NULL) {
+        /*
+         * To maintain backward compatibility with libmemcached, we don't
+         * include the port as the part of the input string to the consistent
+         * hashing algorithm, when it is equal to 11211.
+         */
+        if (field->port == CONF_DEFAULT_KETAMA_PORT) {
+            name = addr;
+            namelen = addrlen;
+        } else {
+            name = addr;
+            namelen = addrlen + 1 + portlen;
+        }
+    }
+
+    status = string_copy(&field->name, name, namelen);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    status = string_copy(&field->addrstr, addr, addrlen);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    /*
+     * The address resolution of the backend server hostname is lazy.
+     * The resolution occurs when a new connection to the server is
+     * created, which could either be the first time or every time
+     * the server gets re-added to the pool after an auto ejection
+     */
+
+    field->valid = 1;
+
+    return CONF_OK;
+}
+
+const char *
+conf_set_num(struct conf *cf, const struct command *cmd, void *conf)
+{
+    uint8_t *p;
+    int num, *np;
+    const struct string *value;
+
+    p = conf;
+    np = (int *)(p + cmd->offset);
+
+    if (*np != CONF_UNSET_NUM) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+
+    num = gf_atoi(value->data, value->len);
+    if (num < 0) {
+        return "is not a number";
+    }
+
+    *np = num;
+
+    return CONF_OK;
+}
+
+const char *
+conf_set_bool(struct conf *cf, const struct command *cmd, void *conf)
+{
+    uint8_t *p;
+    int *bp;
+    const struct string *value;
+
+    p = conf;
+    bp = (int *)(p + cmd->offset);
+
+    if (*bp != CONF_UNSET_NUM) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+
+    if (string_compare(value, &true_str) == 0) {
+        *bp = 1;
+    } else if (string_compare(value, &false_str) == 0) {
+        *bp = 0;
+    } else {
+        return "is not \"true\" or \"false\"";
+    }
+
+    return CONF_OK;
+}
+
+const char *
+conf_set_hash(struct conf *cf, const struct command *cmd, void *conf)
+{
+    uint8_t *p;
+    hash_type_t *hp;
+    const struct string *value, *hash;
+
+    p = conf;
+    hp = (hash_type_t *)(p + cmd->offset);
+
+    if (*hp != CONF_UNSET_HASH) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+
+    for (hash = hash_strings; hash->len != 0; hash++) {
+        if (string_compare(value, hash) != 0) {
+            continue;
+        }
+
+        *hp = (hash_type_t)(hash - hash_strings);
+
+        return CONF_OK;
+    }
+
+    return "is not a valid hash";
+}
+
+const char *
+conf_set_distribution(struct conf *cf, const struct command *cmd, void *conf)
+{
+    uint8_t *p;
+    dist_type_t *dp;
+    const struct string *value, *dist;
+
+    p = conf;
+    dp = (dist_type_t *)(p + cmd->offset);
+
+    if (*dp != CONF_UNSET_DIST) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+
+    for (dist = dist_strings; dist->len != 0; dist++) {
+        if (string_compare(value, dist) != 0) {
+            continue;
+        }
+
+        *dp = (dist_type_t)(dist - dist_strings);
+
+        return CONF_OK;
+    }
+
+    return "is not a valid distribution";
+}
+
+const char *
+conf_set_hashtag(struct conf *cf, const struct command *cmd, void *conf)
+{
+    rstatus_t status;
+    uint8_t *p;
+    struct string *field;
+    const struct string *value;
+
+    p = conf;
+    field = (struct string *)(p + cmd->offset);
+
+    if (field->data != CONF_UNSET_PTR) {
+        return "is a duplicate";
+    }
+
+    value = array_top(&cf->arg);
+
+    if (value->len != 2) {
+        return "is not a valid hash tag string with two characters";
+    }
+
+    status = string_duplicate(field, value);
+    if (status != GF_OK) {
+        return CONF_ERROR;
+    }
+
+    return CONF_OK;
+}
