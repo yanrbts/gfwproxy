@@ -211,5 +211,35 @@ conn_get(void *owner, bool client, bool redis)
          * server receives a response, possibly parsing it, and sends a
          * request upstream.
          */
+        conn->recv = msg_recv;
+        conn->recv_next = rsp_recv_next;
+        conn->recv_done = rsp_recv_done;
+
+        conn->send = msg_send;
+        conn->send_next = req_send_next;
+        conn->send_done = req_send_done;
+
+        conn->close = server_close;
+        conn->active = server_active;
+
+        conn->ref = server_ref;
+        conn->unref = server_unref;
+
+        conn->enqueue_inq = req_server_enqueue_imsgq;
+        conn->dequeue_inq = req_server_dequeue_imsgq;
+        conn->enqueue_outq = req_server_enqueue_omsgq;
+        conn->dequeue_outq = req_server_dequeue_omsgq;
+        // if (redis) {
+        //   conn->post_connect = redis_post_connect;
+        //   conn->swallow_msg = redis_swallow_msg;
+        // } else {
+        //   conn->post_connect = memcache_post_connect;
+        //   conn->swallow_msg = memcache_swallow_msg;
+        // }
     }
+
+    conn->ref(conn, owner);
+    log_debug(LOG_VVERB, "get conn %p client %d", conn, conn->client);
+
+    return conn;
 }
