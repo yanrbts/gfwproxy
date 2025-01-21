@@ -580,3 +580,345 @@ server_ok(struct context *ctx, struct conn *conn)
         server->next_retry = 0LL;
     }
 }
+
+static rstatus_t
+server_pool_update(struct server_pool *pool)
+{
+    rstatus_t status;
+    int64_t now;
+    uint32_t pnlive_server; /* prev # live server */
+
+    if (!pool->auto_eject_hosts) {
+        return GF_OK;
+    }
+
+    if (pool->next_rebuild == 0LL) {
+        return GF_OK;
+    }
+
+    now = gf_usec_now();
+    if (now < 0) {
+        return GF_ERROR;
+    }
+
+    if (now <= pool->next_rebuild) {
+        if (pool->nlive_server == 0) {
+            errno = ECONNREFUSED;
+            return GF_ERROR;
+        }
+        return GF_OK;
+    }
+
+    pnlive_server = pool->nlive_server;
+    status = server_pool_run(pool);
+    if (status != GF_OK) {
+        log_error("updating pool %"PRIu32" with dist %d failed: %s", pool->idx,
+                  pool->dist_type, strerror(errno));
+        return status;
+    }
+
+    log_debug(LOG_INFO, "update pool %"PRIu32" '%.*s' to add %"PRIu32" servers",
+              pool->idx, pool->name.len, pool->name.data,
+              pool->nlive_server - pnlive_server);
+    
+    return GF_OK;
+}
+
+static uint32_t
+server_pool_hash(const struct server_pool *pool, const uint8_t *key, uint32_t keylen)
+{
+    ASSERT(array_n(&pool->server) != 0);
+    ASSERT(key != NULL);
+
+    if (array_n(&pool->server) == 1) {
+        return 0;
+    }
+
+    if (keylen == 0) {
+        return 0;
+    }
+
+    return pool->key_hash((const char *)key, keylen);
+}
+
+uint32_t
+server_pool_idx(const struct server_pool *pool, const uint8_t *key, uint32_t keylen)
+{
+    uint32_t hash, idx;
+    uint32_t nserver = array_n(&pool->server);
+
+    ASSERT(nserver != 0);
+    ASSERT(key != NULL);
+
+    if (nserver == 1) {
+        /* Optimization: Skip hashing and dispatching for pools with only one server */
+        return 0;
+    }
+
+    /*
+     * If hash_tag: is configured for this server pool, we use the part of
+     * the key within the hash tag as an input to the distributor. Otherwise
+     * we use the full key
+     */
+    if (!string_empty(&pool->hash_tag)) {
+        const struct string *tag = &pool->hash_tag;
+        const uint8_t *tag_start, *tag_end;
+
+        tag_start = gf_strchr(key, key+keylen, tag->data[0]);
+        if (tag_start != NULL) {
+            tag_end = gf_strchr(tag_start+1, key+keylen, tag->data[1]);
+            if ((tag_end != NULL) && (tag_end-tag_start > 1)) {
+                key = tag_start+1;
+                keylen = (uint32_t)(tag_end-key);
+            }
+        }
+    }
+
+    switch (pool->dist_type) {
+    case DIST_KETAMA:
+        hash = server_pool_hash(pool, key, keylen);
+        idx = ketama_dispatch(pool->continuum, pool->ncontinuum, hash);
+        break;
+    case DIST_MODULA:
+        hash = server_pool_hash(pool, key, keylen);
+        idx = modula_dispatch(pool->continuum, pool->ncontinuum, hash);
+        break;
+    case DIST_RANDOM:
+        idx = random_dispatch(pool->continuum, pool->ncontinuum, 0);
+        break;
+    default:
+        NOT_REACHED();
+        return 0;
+    }
+    ASSERT(idx < array_n(&pool->server));
+    return idx;
+}
+
+static struct server *
+server_pool_server(struct server_pool *pool, const uint8_t *key, uint32_t keylen)
+{
+    struct server *server;
+    uint32_t idx;
+
+    idx = server_pool_idx(pool, key, keylen);
+    server = array_get(&pool->server, idx);
+
+    log_debug(LOG_VERB, "key '%.*s' on dist %d maps to server '%.*s'", keylen,
+              key, pool->dist_type, server->pname.len, server->pname.data);
+
+    return server;
+}
+
+struct conn *
+server_pool_conn(struct context *ctx, struct server_pool *pool, const uint8_t *key,
+                 uint32_t keylen)
+{
+    rstatus_t status;
+    struct server *server;
+    struct conn *conn;
+
+    status = server_pool_update(pool);
+    if (status != GF_OK) {
+        return NULL;
+    }
+
+    /* from a given {key, keylen} pick a server from pool */
+    server = server_pool_server(pool, key, keylen);
+    if (server == NULL) {
+        return NULL;
+    }
+
+    /* pick a connection to a given server */
+    conn = server_conn(server);
+    if (conn == NULL) {
+        return NULL;
+    }
+
+    status = server_connect(ctx, server, conn);
+    if (status != GF_OK) {
+        server_close(ctx, conn);
+        return NULL;
+    }
+
+    return conn;
+}
+
+static rstatus_t
+server_pool_each_preconnect(void *elem, void *data)
+{
+    rstatus_t status;
+    struct server_pool *sp = elem;
+
+    if (!sp->preconnect) {
+        return GF_OK;
+    }
+
+    status = array_each(&sp->server, server_each_preconnect, NULL);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    return GF_OK;
+}
+
+rstatus_t
+server_pool_preconnect(struct context *ctx)
+{
+    rstatus_t status;
+
+    status = array_each(&ctx->pool, server_pool_each_preconnect, NULL);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    return GF_OK;
+}
+
+static rstatus_t
+server_pool_each_disconnect(void *elem, void *data)
+{
+    rstatus_t status;
+    struct server_pool *sp = elem;
+
+    status = array_each(&sp->server, server_each_disconnect, NULL);
+    if (status != GF_OK) {
+        return status;
+    }
+
+    return GF_OK;
+}
+
+void
+server_pool_disconnect(struct context *ctx)
+{
+    array_each(&ctx->pool, server_pool_each_disconnect, NULL);
+}
+
+static rstatus_t
+server_pool_each_set_owner(void *elem, void *data)
+{
+    struct server_pool *sp = elem;
+    struct context *ctx = data;
+
+    sp->ctx = ctx;
+
+    return GF_OK;
+}
+
+static rstatus_t
+server_pool_each_calc_connections(void *elem, void *data)
+{
+    struct server_pool *sp = elem;
+    struct context *ctx = data;
+
+    ctx->max_nsconn += sp->server_connections * array_n(&sp->server);
+    ctx->max_nsconn += 1; /* pool listening socket */
+
+    return GF_OK;
+}
+
+rstatus_t
+server_pool_run(struct server_pool *pool)
+{
+    ASSERT(array_n(&pool->server) != 0);
+
+    switch (pool->dist_type) {
+    case DIST_KETAMA:
+        return ketama_update(pool);
+    case DIST_MODULA:
+        return modula_update(pool);
+    case DIST_RANDOM:
+        return random_update(pool);
+    default:
+        NOT_REACHED();
+        return GF_ERROR;
+    }
+
+    return GF_OK;
+}
+
+static rstatus_t
+server_pool_each_run(void *elem, void *data)
+{
+    return server_pool_run(elem);
+}
+
+rstatus_t
+server_pool_init(struct array *server_pool, struct array *conf_pool,
+                 struct context *ctx)
+{
+    rstatus_t status;
+    uint32_t npool;
+
+    npool = array_n(conf_pool);
+    ASSERT(npool != 0);
+    ASSERT(array_n(server_pool) == 0);
+
+    status = array_init(server_pool, npool, sizeof(struct server_pool));
+    if (status != GF_OK) {
+        return status;
+    }
+
+    /* transform conf pool to server pool */
+    status = array_each(conf_pool, conf_pool_each_transform, server_pool);
+    if (status != GF_OK) {
+        server_pool_deinit(server_pool);
+        return status;
+    }
+    ASSERT(array_n(server_pool) == npool);
+
+    /* set ctx as the server pool owner */
+    status = array_each(server_pool, server_pool_each_set_owner, ctx);
+    if (status != GF_OK) {
+        server_pool_deinit(server_pool);
+        return status;
+    }
+
+    /* compute max server connections */
+    ctx->max_nsconn = 0;
+    status = array_each(server_pool, server_pool_each_calc_connections, ctx);
+    if (status != GF_OK) {
+        server_pool_deinit(server_pool);
+        return status;
+    }
+
+    /* update server pool continuum */
+    status = array_each(server_pool, server_pool_each_run, NULL);
+    if (status != GF_OK) {
+        server_pool_deinit(server_pool);
+        return status;
+    }
+
+    log_debug(LOG_DEBUG, "init %"PRIu32" pools", npool);
+
+    return GF_OK;
+}
+
+void
+server_pool_deinit(struct array *server_pool)
+{
+    uint32_t i, npool;
+
+    for (i = 0, npool = array_n(server_pool); i < npool; i++) {
+        struct server_pool *sp;
+
+        sp = array_pop(server_pool);
+        ASSERT(sp->p_conn == NULL);
+        ASSERT(TAILQ_EMPTY(&sp->c_conn_q) && sp->nc_conn_q == 0);
+
+        if (sp->continuum != NULL) {
+            gf_free(sp->continuum);
+            sp->ncontinuum = 0;
+            sp->nserver_continuum = 0;
+            sp->nlive_server = 0;
+        }
+
+        server_deinit(&sp->server);
+
+        log_debug(LOG_DEBUG, "deinit pool %"PRIu32" '%.*s'", sp->idx,
+                  sp->name.len, sp->name.data);
+    }
+    array_deinit(server_pool);
+
+    log_debug(LOG_DEBUG, "deinit %"PRIu32" pools", npool);
+}
