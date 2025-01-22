@@ -243,3 +243,231 @@ conn_get(void *owner, bool client, bool redis)
 
     return conn;
 }
+
+struct conn *
+conn_get_proxy(struct server_pool *pool)
+{
+    struct conn *conn;
+
+    conn = _conn_get();
+    if (conn == NULL) {
+        return NULL;
+    }
+
+    conn->redis = pool->redis;
+
+    conn->proxy = 1;
+
+    conn->recv = proxy_recv;
+    conn->recv_next = NULL;
+    conn->recv_done = NULL;
+
+    conn->send = NULL;
+    conn->send_next = NULL;
+    conn->send_done = NULL;
+
+    conn->close = proxy_close;
+    conn->active = NULL;
+
+    conn->ref = proxy_ref;
+    conn->unref = proxy_unref;
+
+    conn->enqueue_inq = NULL;
+    conn->dequeue_inq = NULL;
+    conn->enqueue_outq = NULL;
+    conn->dequeue_outq = NULL;
+
+    conn->ref(conn, pool);
+
+    log_debug(LOG_VVERB, "get conn %p proxy %d", conn, conn->proxy);
+
+    return conn;
+}
+
+static void
+conn_free(struct conn *conn)
+{
+    log_debug(LOG_VVERB, "free conn %p", conn);
+    gf_free(conn);
+}
+
+void
+conn_put(struct conn *conn)
+{
+    ASSERT(conn->sd < 0);
+    ASSERT(conn->owner == NULL);
+
+    log_debug(LOG_VVERB, "put conn %p", conn);
+
+    nfree_connq++;
+    TAILQ_INSERT_HEAD(&free_connq, conn, conn_tqe);
+
+    if (conn->client) {
+        ncurr_cconn--;
+    }
+    ncurr_conn--;
+}
+
+void
+conn_init(void)
+{
+    log_debug(LOG_DEBUG, "conn size %d", (int)sizeof(struct conn));
+    nfree_connq = 0;
+    TAILQ_INIT(&free_connq);
+}
+
+void
+conn_deinit(void)
+{
+    struct conn *conn, *nconn; /* current and next connection */
+
+    for (conn = TAILQ_FIRST(&free_connq); conn != NULL;
+         conn = nconn, nfree_connq--) 
+    {
+        ASSERT(nfree_connq > 0);
+        nconn = TAILQ_NEXT(conn, conn_tqe);
+        conn_free(conn);
+    }
+    ASSERT(nfree_connq == 0);
+}
+
+ssize_t
+conn_recv(struct conn *conn, void *buf, size_t size)
+{
+    ssize_t n;
+
+    ASSERT(buf != NULL);
+    ASSERT(size > 0);
+    ASSERT(conn->recv_ready);
+
+    for (;;) {
+        n = gf_read(conn->sd, buf, size);
+
+        log_debug(LOG_VERB, "recv on sd %d %zd of %zu", conn->sd, n, size);
+
+        if (n > 0) {
+            if (n < (ssize_t)size) {
+                conn->recv_ready = 0;
+            }
+            conn->recv_bytes += (size_t)n;
+            return n;
+        }
+
+        if (n == 0) {
+            conn->recv_ready = 0;
+            conn->eof = 1;
+            log_debug(LOG_INFO, "recv on sd %d eof rb %zu sb %zu", conn->sd,
+                      conn->recv_bytes, conn->send_bytes);
+            return n;
+        }
+
+        if (errno == EINTR) {
+            log_debug(LOG_VERB, "recv on sd %d not ready - eintr", conn->sd);
+            continue;
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            conn->recv_ready = 0;
+            log_debug(LOG_VERB, "recv on sd %d not ready - eagain", conn->sd);
+            return GF_EAGAIN;
+        } else {
+            conn->recv_ready = 0;
+            conn->err = errno;
+            log_error("recv on sd %d failed: %s", conn->sd, strerror(errno));
+            return GF_ERROR;
+        }
+    }
+
+    NOT_REACHED();
+
+    return GF_ERROR;
+}
+
+ssize_t
+conn_sendv(struct conn *conn, const struct array *sendv, size_t nsend)
+{
+    ssize_t n;
+
+    ASSERT(array_n(sendv) > 0);
+    ASSERT(nsend != 0);
+    ASSERT(conn->send_ready);
+
+    for (;;) {
+        n = gf_writev(conn->sd, sendv->elem, sendv->nelem);
+
+        log_debug(LOG_VERB, "sendv on sd %d %zd of %zu in %"PRIu32" buffers",
+                  conn->sd, n, nsend, sendv->nelem);
+
+        if (n > 0) {
+            if (n < (ssize_t) nsend) {
+                conn->send_ready = 0;
+            }
+            conn->send_bytes += (size_t)n;
+            return n;
+        }
+
+        if (n == 0) {
+            log_warn("sendv on sd %d returned zero", conn->sd);
+            conn->send_ready = 0;
+            return 0;
+        }
+
+        if (errno == EINTR) {
+            log_debug(LOG_VERB, "sendv on sd %d not ready - eintr", conn->sd);
+            continue;
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            conn->send_ready = 0;
+            log_debug(LOG_VERB, "sendv on sd %d not ready - eagain", conn->sd);
+            return GF_EAGAIN;
+        } else {
+            conn->send_ready = 0;
+            conn->err = errno;
+            log_error("sendv on sd %d failed: %s", conn->sd, strerror(errno));
+            return GF_ERROR;
+        }
+    }
+
+    NOT_REACHED();
+
+    return GF_ERROR;
+}
+
+uint32_t
+conn_ncurr_conn(void)
+{
+    return ncurr_conn;
+}
+
+uint64_t
+conn_ntotal_conn(void)
+{
+    return ntotal_conn;
+}
+
+uint32_t
+conn_ncurr_cconn(void)
+{
+    return ncurr_cconn;
+}
+
+/*
+ * Returns true if the connection is authenticated or doesn't require
+ * authentication, otherwise return false
+ */
+bool
+conn_authenticated(const struct conn *conn)
+{
+    struct server_pool *pool;
+
+    ASSERT(!conn->proxy);
+
+    pool = conn->client ? conn->owner : ((struct server *)conn->owner)->owner;
+
+    if (!pool->require_auth) {
+        return true;
+    }
+
+    if (!conn->authenticated) {
+        return false;
+    }
+
+    return true;
+}

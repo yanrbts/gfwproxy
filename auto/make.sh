@@ -4,6 +4,7 @@ echo "creating $TCH_MAKEFILE"
 
 mkdir -p $TCH_OBJS/src
 mkdir -p $TCH_OBJS/src/event
+mkdir -p $TCH_OBJS/src/hashkit
 
 tch_objs_dir=$TCH_OBJS$tch_regex_dirsep
 tch_use_pch=`echo $TCH_USE_PCH | sed -e "s/\//$tch_regex_dirsep/g"`

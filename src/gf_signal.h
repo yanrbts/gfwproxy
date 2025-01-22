@@ -25,20 +25,20 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __GF_PROXY_H__
-#define __GF_PROXY_H__
+#ifndef __GF_SIGNAL_H__
+#define __GF_SIGNAL_H__
 
 #include <gf_core.h>
 
-void proxy_ref(struct conn *conn, void *owner);
-void proxy_unref(struct conn *conn);
-void proxy_close(struct context *ctx, struct conn *conn);
+struct signal {
+    int  signo;
+    char *signame;
+    int  flags;
+    void (*handler)(int signo);
+};
 
-rstatus_t proxy_each_init(void *elem, void *data);
-rstatus_t proxy_each_deinit(void *elem, void *data);
-
-rstatus_t proxy_init(struct context *ctx);
-void proxy_deinit(struct context *ctx);
-rstatus_t proxy_recv(struct context *ctx, struct conn *conn);
+rstatus_t signal_init(void);
+void signal_deinit(void);
+void signal_handler(int signo);
 
 #endif

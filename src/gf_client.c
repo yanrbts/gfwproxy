@@ -167,9 +167,8 @@ client_close(struct context *ctx, struct conn *conn)
 
         if (msg->done) {
             log_debug(LOG_INFO, "close c %d discarding %s req %"PRIu64" len "
-                      "%"PRIu32" type %d", conn->sd,
-                      msg->error ? "error": "completed", msg->id, msg->mlen,
-                      msg->type);
+                      "%"PRIu32"", conn->sd,
+                      msg->error ? "error": "completed", msg->id, msg->mlen);
             req_put(msg);
         } else {
             msg->swallow = 1;
@@ -178,8 +177,7 @@ client_close(struct context *ctx, struct conn *conn)
             ASSERT(msg->peer == NULL);
 
             log_debug(LOG_INFO, "close c %d schedule swallow of req %"PRIu64" "
-                      "len %"PRIu32" type %d", conn->sd, msg->id, msg->mlen,
-                      msg->type);
+                      "len %"PRIu32"", conn->sd, msg->id, msg->mlen);
         }
     }
     ASSERT(TAILQ_EMPTY(&conn->omsg_q));

@@ -376,6 +376,15 @@ req_server_enqueue_omsgq(struct context *ctx, struct conn *conn, struct msg *msg
 }
 
 void
+req_client_dequeue_omsgq(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    ASSERT(msg->request);
+    ASSERT(conn->client && !conn->proxy);
+
+    TAILQ_REMOVE(&conn->omsg_q, msg, c_tqe);
+}
+
+void
 req_server_dequeue_omsgq(struct context *ctx, struct conn *conn, struct msg *msg)
 {
     ASSERT(msg->request);
@@ -516,8 +525,8 @@ req_forward_error(struct context *ctx, struct conn *conn, struct msg *msg)
 
     ASSERT(conn->client && !conn->proxy);
 
-    log_debug(LOG_INFO, "forward req %"PRIu64" len %"PRIu32" type %d from "
-              "c %d failed: %s", msg->id, msg->mlen, msg->type, conn->sd,
+    log_debug(LOG_INFO, "forward req %"PRIu64" len %"PRIu32" from "
+              "c %d failed: %s", msg->id, msg->mlen, conn->sd,
               strerror(errno));
     
     msg->done = 1;

@@ -4,12 +4,6 @@
 LC_ALL=C
 export LC_ALL
 
-tar xvfz contrib/yaml-0.2.5.tar.gz -C contrib
-cd contrib/yaml-0.2.5
-./configure
-make
-cd ../../
-
 . auto/options.sh
 . auto/init.sh
 . auto/sources.sh
@@ -20,7 +14,7 @@ echo "#define TCH_CONFIGURE \"$TCH_CONFIGURE\"" > $TCH_AUTO_CONFIG_H
 
 
 if [ $TCH_DEBUG = YES ]; then
-    have=TCH_DEBUG . auto/write.sh
+    have=GF_DEBUG_LOG . auto/write.sh
 fi
 
 if test -z "$TCH_PLATFORM"; then
@@ -44,6 +38,12 @@ else
     echo "building for $TCH_PLATFORM"
     TCH_SYSTEM=$TCH_PLATFORM
 fi
+
+tar xvfz contrib/yaml-0.2.5.tar.gz -C contrib
+cd contrib/yaml-0.2.5
+./configure
+make
+cd ../../
 
 . auto/cc/conf.sh
 . auto/os/conf.sh

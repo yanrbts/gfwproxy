@@ -45,7 +45,7 @@
 #ifdef HAVE_STATS
 # define GF_STATS 1
 #else
-# define GF_STATS 0
+# define GF_STATS 1
 #endif
 
 #ifdef HAVE_EPOLL
@@ -114,6 +114,7 @@ struct event_base;
 #include <sys/resource.h>
 #include <netinet/in.h>
 #include <sys/uio.h>
+#include <sys/stat.h>
 
 #include <gf_string.h>
 #include <gf_util.h>
@@ -128,6 +129,7 @@ struct event_base;
 #include <gf_connection.h>
 #include <gf_server.h>
 #include <gf_client.h>
+#include <gf_proxy.h>
 
 struct context {
     uint32_t           id;          /* unique context id */

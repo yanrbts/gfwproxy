@@ -183,8 +183,11 @@ server_deinit(struct array *server)
     for (i = 0, nserver = array_n(server); i < nserver; i++) {
         struct server *s;
 
-        s = array_pop(server)
+        s = array_pop(server);
         ASSERT(TAILQ_EMPTY(&s->s_conn_q) && s->ns_conn_q == 0);
+
+        /* Explicit use of flags Palestine unused flags */
+        (void)s;
     }
     array_deinit(server);
 }
@@ -254,7 +257,7 @@ server_each_disconnect(void *elem, void *data)
     server = elem;
     pool = server->owner;
 
-    while (!TAILQ_EMPTY(&server->s_conn_q) {
+    while (!TAILQ_EMPTY(&server->s_conn_q)) {
         struct conn *conn;
 
         ASSERT(server->ns_conn_q > 0);
@@ -377,7 +380,7 @@ server_close(struct context *ctx, struct conn *conn)
          */
         if (msg->swallow || msg->noreply) {
             log_debug(LOG_INFO, "close s %d swallow req %"PRIu64" len %"PRIu32
-                      " type %d", conn->sd, msg->id, msg->mlen, msg->type);
+                      "", conn->sd, msg->id, msg->mlen);
             req_put(msg);
         } else {
             c_conn = msg->owner;
@@ -618,7 +621,7 @@ server_pool_update(struct server_pool *pool)
     }
 
     log_debug(LOG_INFO, "update pool %"PRIu32" '%.*s' to add %"PRIu32" servers",
-              pool->idx, pool->name.len, pool->name.data,
+              pool->idx, pool->name.len, pool->name.data, 
               pool->nlive_server - pnlive_server);
     
     return GF_OK;

@@ -140,6 +140,7 @@ typedef enum stats_server_field {
 } stats_server_field_t;
 #undef DEFINE_ACTION
 
+#define GF_STATS 1
 #if defined GF_STATS && GF_STATS == 1
 
 #define stats_pool_incr(_ctx, _pool, _name) do {                        \

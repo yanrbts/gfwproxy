@@ -100,7 +100,7 @@ modula_update(struct server_pool *pool)
         uint32_t nserver_continuum = total_weight + MODULA_CONTINUUM_ADDITION;
         uint32_t ncontinuum = nserver_continuum *  MODULA_POINTS_PER_SERVER;
 
-        continuum = nc_realloc(pool->continuum, sizeof(*continuum) * ncontinuum);
+        continuum = gf_realloc(pool->continuum, sizeof(*continuum) * ncontinuum);
         if (continuum == NULL) {
             return GF_ENOMEM;
         }

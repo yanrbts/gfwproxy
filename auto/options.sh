@@ -14,7 +14,7 @@ TCH_ADDON_DEPS=
 TCH_CC_OPT=
 TCH_LD_OPT=
 CPU=NO
-TCH_LIB=" -lpthread -lm -rdynamic"
+TCH_LIB=" -lpthread -lm -rdynamic -Wl,-rpath, -L./contrib/yaml-0.2.5/src/.libs -lyaml"
 
 TCH_PLATFORM=
 

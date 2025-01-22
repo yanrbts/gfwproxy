@@ -1598,7 +1598,7 @@ conf_add_server(struct conf *cf, const struct command *cmd, void *conf)
 
     if (value->data[0] != '/') {
         field->port = gf_atoi(port, portlen);
-        if (field->port < 0 || !nc_valid_port(field->port)) {
+        if (field->port < 0 || !gf_valid_port(field->port)) {
             return "has an invalid port in \"hostname:port:weight [name]\" format string";
         }
     }

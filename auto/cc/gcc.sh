@@ -150,7 +150,7 @@ case "$TCH_GCC_VER" in
 
     *)
         # we have a lot of the unused function arguments
-        CFLAGS="$CFLAGS -Wno-unused-parameter"
+        CFLAGS="$CFLAGS -Wno-unused-parameter -Wno-implicit-fallthrough"
         # 4.2.1 shows the warning in wrong places
         #CFLAGS="$CFLAGS -Wunreachable-code"
 

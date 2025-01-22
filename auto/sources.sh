@@ -1,7 +1,8 @@
 # Copyright (C) Yan Ruibing
 
 CORE_INCS="src \
-           contrib/yaml-0.2.5/include"
+           contrib/yaml-0.2.5/include \
+           src/hashkit"
 
 CORE_DEPS="src/gf_core.h    \
            src/gf_queue.h   \
@@ -16,7 +17,11 @@ CORE_DEPS="src/gf_core.h    \
            src/gf_server.h  \
            src/gf_message.h \
            src/event/gf_event.h \
-           src/gf_client.h"
+           src/hashkit/gf_hashkit.h \
+           src/gf_client.h  \
+           src/gf_proxy.h   \
+           src/gf_conf.h    \
+           src/gf_signal.h"
 
 CORE_SRCS="src/gfw.c        \
            src/gf_util.c    \
@@ -32,8 +37,23 @@ CORE_SRCS="src/gfw.c        \
            src/event/gf_epoll.c \
            src/event/gf_evport.c \
            src/event/gf_kqueue.c \
+           src/hashkit/gf_crc16.c \
+           src/hashkit/gf_crc32.c \
+           src/hashkit/gf_fnv.c \
+           src/hashkit/gf_md5.c \
+           src/hashkit/gf_hsieh.c \
+           src/hashkit/gf_jenkins.c \
+           src/hashkit/gf_ketama.c \
+           src/hashkit/gf_modula.c \
+           src/hashkit/gf_murmur.c \
+           src/hashkit/gf_one_at_a_time.c \
+           src/hashkit/gf_random.c \
            src/gf_request.c \
-           src/gf_client.c"
+           src/gf_response.c \
+           src/gf_client.c  \
+           src/gf_proxy.c   \
+           src/gf_conf.c    \
+           src/gf_signal.c"
 
 UNIX_INCS="$CORE_INCS"
 
