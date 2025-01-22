@@ -133,7 +133,7 @@ struct event_base;
 
 struct context {
     uint32_t           id;          /* unique context id */
-    // struct conf        *cf;         /* configuration */
+    struct conf        *cf;         /* configuration */
     struct stats       *stats;      /* stats */
 
     struct array       pool;        /* server_pool[] */
@@ -160,5 +160,10 @@ struct instance {
     const char      *pid_filename;               /* pid filename */
     unsigned        pidfile:1;                   /* pid file created? */
 };
+
+struct context *core_start(struct instance *nci);
+void core_stop(struct context *ctx);
+rstatus_t core_core(void *arg, uint32_t events);
+rstatus_t core_loop(struct context *ctx);
 
 #endif
