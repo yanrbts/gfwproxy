@@ -17,6 +17,10 @@ if [ $TCH_DEBUG = YES ]; then
     have=GF_DEBUG_LOG . auto/write.sh
 fi
 
+if [ $TCH_STATS = YES ]; then
+    have=HAVE_STATS . auto/write.sh
+fi
+
 if test -z "$TCH_PLATFORM"; then
     echo "checking for OS"
 

@@ -388,9 +388,9 @@ msg_dump(const struct msg *msg, int level)
         return;
     }
 
-    // loga("msg dump id %"PRIu64" request %d len %"PRIu32" type %d done %d "
-    //      "error %d (err %d)", msg->id, msg->request, msg->mlen, msg->type,
-    //      msg->done, msg->error, msg->err);
+    loga("msg dump id %"PRIu64" request %d len %"PRIu32" done %d "
+         "error %d (err %d)", msg->id, msg->request, msg->mlen,
+         msg->done, msg->error, msg->err);
 
     STAILQ_FOREACH(mbuf, &msg->mhdr, next) {
         uint8_t *p, *q;
@@ -623,15 +623,12 @@ msg_parse(struct context *ctx, struct conn *conn, struct msg *msg)
     case MSG_PARSE_OK:
         status = msg_parsed(ctx, conn, msg);
         break;
-
     case MSG_PARSE_REPAIR:
         status = msg_repair(ctx, conn, msg);
         break;
-
     case MSG_PARSE_AGAIN:
         status = GF_OK;
         break;
-
     default:
         status = GF_ERROR;
         conn->err = errno;

@@ -56,10 +56,11 @@ signal_init(void)
         sa.sa_flags = sig->flags;
         sigemptyset(&sa.sa_mask);
 
+        /* The  sigaction() system call is used to change the action taken by 
+         * a process on receipt of a specific signal. */
         status = sigaction(sig->signo, &sa, NULL);
         if (status < 0) {
-            log_error("sigaction(%s) failed: %s", sig->signame,
-                      strerror(errno));
+            log_error("sigaction(%s) failed: %s", sig->signame, strerror(errno));
             return GF_ERROR;
         }
     }
@@ -77,8 +78,8 @@ signal_handler(int signo)
 {
     const struct signal *sig;
     void (*action)(void);
-    char *actionstr;
-    bool done;
+    char *actionstr = "";
+    bool done = false;
 
     for (sig = signals; sig->signo != 0; sig++) {
         if (sig->signo == signo) {
@@ -87,9 +88,7 @@ signal_handler(int signo)
     }
     ASSERT(sig->signo != 0);
 
-    actionstr = "";
     action = NULL;
-    done = false;
 
     switch (signo) {
     case SIGUSR1:
@@ -117,7 +116,6 @@ signal_handler(int signo)
         actionstr = ", core dumping";
         raise(SIGSEGV);
         break;
-
     default:
         NOT_REACHED();
     }

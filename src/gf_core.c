@@ -166,3 +166,216 @@ core_ctx_destroy(struct context *ctx)
     conf_destroy(ctx->cf);
     gf_free(ctx);
 }
+
+struct context *
+core_start(struct instance *nci)
+{
+    struct context *ctx;
+
+    mbuf_init(nci->mbuf_chunk_size);
+    msg_init();
+    conn_init();
+
+    ctx = core_ctx_create(nci);
+    if (ctx != NULL) {
+        nci->ctx = ctx;
+        return ctx;
+    }
+
+    conn_deinit();
+    msg_deinit();
+    mbuf_deinit();
+
+    return NULL;
+}
+
+void
+core_stop(struct context *ctx)
+{
+    conn_deinit();
+    msg_deinit();
+    mbuf_deinit();
+    core_ctx_destroy(ctx);
+}
+
+static rstatus_t
+core_recv(struct context *ctx, struct conn *conn)
+{
+    rstatus_t status;
+
+    status = conn->recv(ctx, conn);
+    if (status != GF_OK) {
+        log_debug(LOG_INFO, "recv on %c %d failed: %s",
+                  conn->client ? 'c' : (conn->proxy ? 'p' : 's'), conn->sd,
+                  strerror(errno));
+    }
+
+    return status;
+}
+
+static rstatus_t
+core_send(struct context *ctx, struct conn *conn)
+{
+    rstatus_t status;
+
+    status = conn->send(ctx, conn);
+    if (status != GF_OK) {
+        log_debug(LOG_INFO, "send on %c %d failed: status: %d errno: %d %s",
+                  conn->client ? 'c' : (conn->proxy ? 'p' : 's'), conn->sd,
+                  status, errno, strerror(errno));
+    }
+
+    return status;
+}
+
+static void
+core_close(struct context *ctx, struct conn *conn)
+{
+    rstatus_t status;
+    char type;
+    const char *addrstr;
+
+    ASSERT(conn->sd > 0);
+
+    if (conn->client) {
+        type = 'c';
+        addrstr = gf_unresolve_peer_desc(conn->sd);
+    } else {
+        type = conn->proxy ? 'p' : 's';
+        addrstr = gf_unresolve_addr(conn->addr, conn->addrlen);
+    }
+
+    log_debug(LOG_NOTICE, "close %c %d '%s' on event %04"PRIX32" eof %d done "
+              "%d rb %zu sb %zu%c %s", type, conn->sd, addrstr, conn->events,
+              conn->eof, conn->done, conn->recv_bytes, conn->send_bytes,
+              conn->err ? ':' : ' ', conn->err ? strerror(conn->err) : "");
+
+    status = event_del_conn(ctx->evb, conn);
+    if (status < 0) {
+        log_warn("event del conn %c %d failed, ignored: %s",
+                 type, conn->sd, strerror(errno));
+    }
+
+    conn->close(ctx, conn);
+}
+
+static void
+core_error(struct context *ctx, struct conn *conn)
+{
+    rstatus_t status;
+    char type = conn->client ? 'c' : (conn->proxy ? 'p' : 's');
+
+    status = gf_get_soerror(conn->sd);
+    if (status < 0) {
+        log_warn("get soerr on %c %d failed, ignored: %s", type, conn->sd,
+                  strerror(errno));
+    }
+    conn->err = errno;
+
+    core_close(ctx, conn);
+}
+
+static void
+core_timeout(struct context *ctx)
+{
+    for (;;) {
+        struct msg *msg;
+        struct conn *conn;
+        int64_t now, then;
+
+        msg = msg_tmo_min();
+        if (msg == NULL) {
+            ctx->timeout = ctx->max_timeout;
+            return;
+        }
+
+        /* skip over req that are in-error or done */
+        if (msg->error || msg->done) {
+            msg_tmo_delete(msg);
+            continue;
+        }
+
+        /*
+         * timeout expired req and all the outstanding req on the timing
+         * out server
+         */
+        conn = msg->tmo_rbe.data;
+        then = msg->tmo_rbe.key;
+
+        now = gf_msec_now();
+        if (now < then) {
+            int delta = (int)(then - now);
+            ctx->timeout = MIN(delta, ctx->max_timeout);
+            return;
+        }
+
+        log_debug(LOG_INFO, "req %"PRIu64" on s %d timedout", msg->id, conn->sd);
+
+        msg_tmo_delete(msg);
+        conn->err = ETIMEDOUT;
+
+        core_close(ctx, conn);
+    }
+}
+
+rstatus_t
+core_core(void *arg, uint32_t events)
+{
+    rstatus_t status;
+    struct conn *conn = arg;
+    struct context *ctx;
+
+    if (conn->owner == NULL) {
+        log_warn("conn is already unrefed!");
+        return GF_OK;
+    }
+
+    ctx = conn_to_ctx(conn);
+
+    log_debug(LOG_VVERB, "event %04"PRIX32" on %c %d", events,
+              conn->client ? 'c' : (conn->proxy ? 'p' : 's'), conn->sd);
+
+    conn->events = events;
+
+    /* error takes precedence over read | write */
+    if (events & EVENT_ERR) {
+        core_error(ctx, conn);
+        return GF_ERROR;
+    }
+
+    /* read takes precedence over write */
+    if (events & EVENT_READ) {
+        status = core_recv(ctx, conn);
+        if (status != GF_OK || conn->done || conn->err) {
+            core_close(ctx, conn);
+            return GF_ERROR;
+        }
+    }
+
+    if (events & EVENT_WRITE) {
+        status = core_send(ctx, conn);
+        if (status != GF_OK || conn->done || conn->err) {
+            core_close(ctx, conn);
+            return GF_ERROR;
+        }
+    }
+
+    return GF_OK;
+}
+
+rstatus_t
+core_loop(struct context *ctx)
+{
+    int nsd;
+
+    nsd = event_wait(ctx->evb, ctx->timeout);
+    if (nsd < 0) {
+        return nsd;
+    }
+
+    core_timeout(ctx);
+
+    stats_swap(ctx->stats);
+
+    return GF_OK;
+}

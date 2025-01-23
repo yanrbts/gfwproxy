@@ -142,7 +142,6 @@ void _log(const char *file, int line, int panic, const char *fmt, ...)
     len = 0;            /* length of output buffer */
     size = LOG_MAX_LEN; /* size of output buffer */
 
-
     /* get current time */
 	now = time(NULL);
 	lt_ret = localtime_r(&now, &now_tm);

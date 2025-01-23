@@ -45,7 +45,7 @@
 #ifdef HAVE_STATS
 # define GF_STATS 1
 #else
-# define GF_STATS 1
+# define GF_STATS 0
 #endif
 
 #ifdef HAVE_EPOLL

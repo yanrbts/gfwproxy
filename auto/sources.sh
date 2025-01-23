@@ -53,7 +53,8 @@ CORE_SRCS="src/gfw.c        \
            src/gf_client.c  \
            src/gf_proxy.c   \
            src/gf_conf.c    \
-           src/gf_signal.c"
+           src/gf_signal.c  \
+           src/gf_core.c"
 
 UNIX_INCS="$CORE_INCS"
 

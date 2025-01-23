@@ -294,7 +294,8 @@ server_failure(struct context *ctx, struct server *server)
         return;
     }
 
-    stats_server_set_ts(ctx, server, server_ejected_at, now);
+    if (stats_enabled)
+        stats_server_set_ts(ctx, server, server_ejected_at, now);
 
     next = now + pool->server_retry_timeout;
 

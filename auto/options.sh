@@ -9,6 +9,7 @@ CPP=
 TCH_OBJS=objs
 
 TCH_DEBUG=NO
+TCH_STATS=YES
 TCH_ADDON_SRCS=
 TCH_ADDON_DEPS=
 TCH_CC_OPT=
@@ -33,6 +34,7 @@ do
         --help)                          help=yes                   ;;
         --with-cpu-opt=*)                CPU="$value"               ;;
         --with-debug)                    TCH_DEBUG=YES              ;;
+        --disable-stats)                 TCH_STATS=NO               ;;
         *)
             echo "$0: error: invalid option \"$option\""
             exit 1
@@ -51,7 +53,7 @@ cat << END
                                      pentium, pentiumpro, pentium3, pentium4,
                                      athlon, opteron, sparc32, sparc64, ppc64
   --with-debug                       enable debug logging
-
+  --disable-stats                    disable stats
 END
 
     exit 1
