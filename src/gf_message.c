@@ -732,7 +732,6 @@ msg_send_chain(struct context *ctx, struct conn *conn, struct msg *msg)
     array_set(&sendv, iov, sizeof(iov[0]), GF_IOV_MAX);
 
     /* preprocess - build iovec */
-
     nsend = 0;
     /*
      * readv() and writev() returns EINVAL if the sum of the iov_len values
@@ -792,7 +791,6 @@ msg_send_chain(struct context *ctx, struct conn *conn, struct msg *msg)
     nsent = n > 0 ? (size_t)n : 0;
 
     /* postprocess - process sent messages in send_msgq */
-
     for (msg = TAILQ_FIRST(&send_msgq); msg != NULL; msg = nmsg) {
         nmsg = TAILQ_NEXT(msg, m_tqe);
 

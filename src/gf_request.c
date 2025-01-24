@@ -474,7 +474,9 @@ req_make_reply(struct context *ctx, struct conn *conn, struct msg *req)
     return GF_OK;
 }
 
-
+/* Check whether the filter exits the command. 
+ * If so, return directly without interacting with the service.
+ * conn is the client connection. */
 static bool
 req_filter(struct conn *conn, struct msg *msg)
 {
