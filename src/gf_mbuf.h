@@ -30,6 +30,20 @@
 
 #include <gf_core.h>
 
+/* 
+ * start                                                      end
+ *   |                                                         |
+ *   v                                                         v
+ * +---+------------------------+---------------------------+---+
+ * |   |                        |                           |   |
+ * |   |<- pos (read marker)    |<- last (write marker)     |   |
+ * |   |                        |                           |   |
+ * +---+------------------------+---------------------------+---+
+ *   ^                                                         ^
+ *   |                                                         |
+ * start                                                      end
+ */
+
 typedef void (*mbuf_copy_t)(struct mbuf *, void *);
 
 struct mbuf {

@@ -275,6 +275,9 @@ mbuf_init(size_t cksize)
     STAILQ_INIT(&free_mbufq);
 
     mbuf_chunk_size = cksize;
+
+    /* Calculating the offset in this way will 
+     * put the head at the end of the memory.*/
     mbuf_offset = mbuf_chunk_size - MBUF_HSIZE;
 
     log_debug(LOG_DEBUG, "mbuf hsize %d chunk size %zu offset %zu length %zu",

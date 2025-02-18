@@ -100,7 +100,7 @@
 
 #define ASSERT(_x) do {                         \
     if (!(_x)) {                                \
-        nc_assert(#_x, __FILE__, __LINE__, 1);  \
+        gf_assert(#_x, __FILE__, __LINE__, 1);  \
     }                                           \
 } while (0)
 
@@ -110,7 +110,7 @@
 
 #define ASSERT(_x) do {                         \
     if (!(_x)) {                                \
-        nc_assert(#_x, __FILE__, __LINE__, 0);  \
+        gf_assert(#_x, __FILE__, __LINE__, 0);  \
     }                                           \
 } while (0)
 
